@@ -1,0 +1,100 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mgcleaning
+      POSTGRES_USER: ${SERVICE_USER_POSTGRES:?}
+      POSTGRES_PASSWORD: ${SERVICE_PASSWORD_64_POSTGRES:?}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["node", "dist/db/migrate.js"]
+    restart: "no"
+    exclude_from_hc: true
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${SERVICE_USER_POSTGRES}:${SERVICE_PASSWORD_64_POSTGRES}@postgres:5432/mgcleaning
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    expose:
+      - "4000"
+    environment:
+      NODE_ENV: production
+      API_PORT: "4000"
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:?}
+      DATABASE_URL: postgresql://${SERVICE_USER_POSTGRES}:${SERVICE_PASSWORD_64_POSTGRES}@postgres:5432/mgcleaning
+      REDIS_URL: redis://redis:6379
+      EMAIL_PROVIDER: resend
+      RESEND_API_KEY: ${RESEND_API_KEY:?}
+      EMAIL_FROM: ${EMAIL_FROM:?}
+      INQUIRY_NOTIFICATION_TO: ${INQUIRY_NOTIFICATION_TO:?}
+      INQUIRY_SECURITY_SECRET: ${INQUIRY_SECURITY_SECRET:?}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+      INQUIRY_MAX_BODY_BYTES: ${INQUIRY_MAX_BODY_BYTES:-32768}
+      INQUIRY_RATE_LIMIT_WINDOW_SECONDS: ${INQUIRY_RATE_LIMIT_WINDOW_SECONDS:-900}
+      INQUIRY_RATE_LIMIT_PER_WINDOW: ${INQUIRY_RATE_LIMIT_PER_WINDOW:-5}
+      INQUIRY_RATE_LIMIT_DAY_SECONDS: ${INQUIRY_RATE_LIMIT_DAY_SECONDS:-86400}
+      INQUIRY_RATE_LIMIT_PER_DAY: ${INQUIRY_RATE_LIMIT_PER_DAY:-20}
+      INQUIRY_IDENTITY_LIMIT_PER_DAY: ${INQUIRY_IDENTITY_LIMIT_PER_DAY:-3}
+      INQUIRY_FINGERPRINT_TTL_SECONDS: ${INQUIRY_FINGERPRINT_TTL_SECONDS:-1800}
+      INQUIRY_MAX_DATE_DAYS: ${INQUIRY_MAX_DATE_DAYS:-365}
+      INQUIRY_MAX_EMAIL_ATTEMPTS: ${INQUIRY_MAX_EMAIL_ATTEMPTS:-5}
+      TURNSTILE_MODE: ${TURNSTILE_MODE:-off}
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
+      TURNSTILE_TIMEOUT_MS: ${TURNSTILE_TIMEOUT_MS:-3000}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch("http://127.0.0.1:4000/api/v1/health").then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  postgres-data:
+  redis-data:

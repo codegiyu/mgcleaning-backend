@@ -1,0 +1,50 @@
+{
+  "name": "@mgcleaning/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:migrate:runtime": "node dist/db/migrate.js",
+    "db:studio": "drizzle-kit studio",
+    "admin:bootstrap": "tsx src/scripts/bootstrapAdmin.ts",
+    "admin:bootstrap:runtime": "node dist/scripts/bootstrapAdmin.js"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "@hono/zod-validator": "^0.9.1",
+    "bullmq": "^6.3.4",
+    "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.13.7",
+    "ioredis": "^5.11.1",
+    "nodemailer": "^10.0.9",
+    "postgres": "^3.4.9",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-email": "^6.9.5",
+    "resend": "^6.28.0",
+    "zod": "^4.6.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.1",
+    "@types/nodemailer": "^8.0.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "drizzle-kit": "^0.31.10",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.0"
+  },
+  "overrides": {
+    "@esbuild-kit/core-utils": {
+      "esbuild": "^0.25.12"
+    }
+  }
+}
