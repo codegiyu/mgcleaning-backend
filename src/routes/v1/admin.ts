@@ -70,7 +70,7 @@ const blogPostInputSchema = z
     excerpt: z.string().trim().min(8).max(320),
     body: z.string().trim().min(20).max(20_000),
     category: z.string().trim().min(2).max(80),
-    authorName: z.string().trim().min(2).max(120).default("M&G Cleaning Service"),
+    authorName: z.string().trim().min(2).max(120).default("M&G Cleaning Services"),
     serviceSlug: z.string().trim().min(2).max(120).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
     coverImageUrl: z.preprocess(
       (value) => (value === "" ? undefined : value),

@@ -13,7 +13,7 @@ const validPostPayload = {
   excerpt: "An example article summary for the local demo site.",
   body: "Sample article content for a local demo.\n\nThis paragraph is only placeholder material.",
   category: "Upholstery care",
-  authorName: "M&G Cleaning Service",
+  authorName: "M&G Cleaning Services",
   serviceSlug: "upholstery-cleaning",
 };
 

@@ -16,7 +16,7 @@ export const blogPosts = pgTable(
     excerpt: varchar("excerpt", { length: 320 }).notNull(),
     body: text("body").notNull(),
     category: varchar("category", { length: 80 }).notNull(),
-    authorName: varchar("author_name", { length: 120 }).notNull().default("M&G Cleaning Service"),
+    authorName: varchar("author_name", { length: 120 }).notNull().default("M&G Cleaning Services"),
     serviceSlug: varchar("service_slug", { length: 120 }),
     coverImageUrl: text("cover_image_url"),
     coverImageAlt: varchar("cover_image_alt", { length: 250 }),

@@ -194,7 +194,7 @@ function createEmailOutboxRows(
       inquiryId: inquiry.id,
       kind: "internal",
       to: recipient,
-      subject: `New M&G Cleaning Service ${input.inquiryType === "booking" ? "cleaning request" : "contact message"} · ${inquiry.reference}`,
+      subject: `New M&G Cleaning Services ${input.inquiryType === "booking" ? "cleaning request" : "contact message"} · ${inquiry.reference}`,
       title: input.inquiryType === "booking" ? "New cleaning request" : "New contact message",
       message: details.join("\n\n"),
     },
@@ -204,7 +204,7 @@ function createEmailOutboxRows(
       inquiryId: inquiry.id,
       kind: "customer",
       to: input.email,
-      subject: `M&G Cleaning Service request received · ${inquiry.reference}`,
+      subject: `M&G Cleaning Services request received · ${inquiry.reference}`,
       title: "Your cleaning request has been received",
       message: customerMessage,
     });

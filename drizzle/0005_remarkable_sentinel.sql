@@ -1,0 +1,1 @@
+ALTER TABLE "blog_posts" ALTER COLUMN "author_name" SET DEFAULT 'M&G Cleaning Services';

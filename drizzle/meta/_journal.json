@@ -36,6 +36,13 @@
       "when": 1790642819478,
       "tag": "0004_dear_penance",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790842229149,
+      "tag": "0005_remarkable_sentinel",
+      "breakpoints": true
     }
   ]
 }
