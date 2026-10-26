@@ -34,6 +34,7 @@ function admin(dependencies: Partial<AdminRouterDependencies> = {}) {
       return {
         id: "01c47f57-ea8c-4583-aad4-9ec537f4ff41",
         ...input,
+        coverMediaId: null,
         coverImageUrl: input.coverImageUrl ?? null,
         coverImageAlt: input.coverImageAlt ?? null,
         seoTitle: input.seoTitle ?? null,
@@ -123,6 +124,7 @@ describe("admin blog editor", () => {
       return {
         id: "01c47f57-ea8c-4583-aad4-9ec537f4ff41",
         ...input,
+        coverMediaId: null,
         coverImageUrl: null,
         coverImageAlt: null,
         seoTitle: null,
@@ -171,6 +173,7 @@ function storedPost(overrides: Partial<Parameters<typeof planPostPatch>[0]> = {}
   return {
     id: postId,
     ...validPostPayload,
+    coverMediaId: null,
     coverImageUrl: "https://media.example.test/cover.webp",
     coverImageAlt: "A freshly cleaned sofa",
     seoTitle: null,

@@ -6,6 +6,7 @@ import {
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
+import { mediaAssets } from "./mediaAssets.js";
 
 export const blogPosts = pgTable(
   "blog_posts",
@@ -18,6 +19,9 @@ export const blogPosts = pgTable(
     category: varchar("category", { length: 80 }).notNull(),
     authorName: varchar("author_name", { length: 120 }).notNull().default("M&G Cleaning Services"),
     serviceSlug: varchar("service_slug", { length: 120 }),
+    /** Verified upload used as the cover; deleting a referenced asset is refused. */
+    coverMediaId: uuid("cover_media_id").references(() => mediaAssets.id, { onDelete: "restrict" }),
+    /** Denormalised from the cover asset so public reads need no join. */
     coverImageUrl: text("cover_image_url"),
     coverImageAlt: varchar("cover_image_alt", { length: 250 }),
     seoTitle: varchar("seo_title", { length: 180 }),
@@ -35,6 +39,7 @@ export const blogPosts = pgTable(
     index("blog_posts_status_published_at_idx").on(table.status, table.publishedAt),
     index("blog_posts_category_idx").on(table.category),
     index("blog_posts_service_slug_idx").on(table.serviceSlug),
+    index("blog_posts_cover_media_id_idx").on(table.coverMediaId),
   ],
 );
 
