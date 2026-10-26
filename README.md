@@ -38,7 +38,8 @@ Set these Compose variables in Coolify before deployment:
 - `EMAIL_FROM`: sender address on a domain verified with Resend.
 - `INQUIRY_NOTIFICATION_TO`: real inbox that should receive inquiry alerts.
 - `INQUIRY_SECURITY_SECRET`: random secret used to hash rate-limit and duplicate-detection identifiers.
-- `TRUST_PROXY_HOPS`: number of trusted reverse-proxy hops used to resolve visitor IPs; use `1` behind the documented Coolify proxy and keep it `0` for direct local requests.
+- `TRUST_PROXY_HOPS`: number of trusted reverse-proxy hops used to resolve visitor IPs; use `1` behind the documented Coolify proxy and keep it `0` for direct local requests. The client IP is read that many entries from the right of `X-Forwarded-For`, so client-supplied entries are ignored.
+- `LOG_LEVEL` (optional): pino log level, `info` by default.
 - `TURNSTILE_MODE` and `TURNSTILE_SECRET_KEY`: leave Turnstile off until abuse warrants it, then configure the server secret and the matching frontend site key.
 - `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD`: set only for the initial bootstrap.
 
@@ -51,6 +52,8 @@ The public Next.js app is deployed separately from the `mgcleaning` repository a
 The admin API includes session login/logout, an inquiry inbox with private status/notes, and blog draft/publish operations. Create the first admin after migrations: set `BOOTSTRAP_ADMIN_EMAIL` and a unique `BOOTSTRAP_ADMIN_PASSWORD` of at least 12 characters in `.env`, then run `npm run admin:bootstrap`. The command stores a scrypt password hash; remove the bootstrap password from `.env` after it succeeds. It will not reset an existing account. Sessions are random opaque values stored as hashes, expire after 12 hours, and are returned only in an HttpOnly cookie. Admin writes require the configured `FRONTEND_ORIGIN`.
 
 Published articles are exposed at `GET /api/v1/blog` and `GET /api/v1/blog/:slug`. Public reads only return published posts. Admin post content is plain text with limited headings, bold, and bullet-list conventions; raw HTML is not interpreted. Each article records an author name and optional related service slug. Publishing requires an author, related service, HTTPS cover image, and cover-image alt text. Cover images currently use HTTPS URLs because object storage has not yet been selected.
+
+Logs are structured JSON (pino) with contact details and credentials redacted. Every response carries an `X-Request-Id` header (a well-formed incoming ID is reused), and each request log line includes it. Admin sign-ins, sign-outs, inquiry changes, and blog post changes are written to the append-only `admin_audit_events` table in the same transaction as the change; audit metadata records field names and status transitions, never contact details or note text, and IPs are stored only as keyed hashes.
 
 Run `npm test`, `npm run typecheck`, and `npm run build` for checks. Generate a migration after schema changes with `npm run db:generate`, then review and apply it with `npm run db:migrate`.
 
