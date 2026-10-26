@@ -7,6 +7,7 @@ import {
 } from "./routes/v1/admin.js";
 
 const actor = { id: "b48d4f5b-37e4-4f3b-bd0e-2ce9712dd4a5", email: "admin@example.test" };
+const sessionActor = { ...actor, sessionId: "c0ffee00-1d2e-4f3a-8b9c-0d1e2f3a4b5c" };
 const token = "a-session-token-used-only-in-this-test";
 const postId = "01c47f57-ea8c-4583-aad4-9ec537f4ff41";
 const validPostPayload = {
@@ -41,7 +42,7 @@ function postFromInput(input: CreateInput) {
 function admin(dependencies: Partial<AdminRouterDependencies> = {}) {
   const defaults: AdminRouterDependencies = {
     async login() { return { kind: "success", actor, token }; },
-    async resolveSession(value) { return value === token ? actor : null; },
+    async resolveSession(value) { return value === token ? sessionActor : null; },
     async revokeSession() {},
     async getOverview() { return { inquiryCounts: { total: 0, new: 0 }, postCounts: { draft: 0, published: 0 } }; },
     async listInquiries() { return { items: [], total: 0 }; },
@@ -88,6 +89,7 @@ describe("admin authentication", () => {
 
     const session = await router.request("/auth/session", { headers: { Cookie: `mg_admin_session=${token}` } });
     expect(session.status).toBe(200);
+    // The session ID is server-side state and must not reach the browser.
     expect((await session.json()).data).toEqual({ authenticated: true, user: actor });
   });
 

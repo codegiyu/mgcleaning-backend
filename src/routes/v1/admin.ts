@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, count, desc, eq, gt, ilike, or } from "drizzle-orm";
+import { and, count, desc, eq, gt, ilike, lt, or, sql } from "drizzle-orm";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
@@ -9,6 +9,7 @@ import { BLOG_POST_SLUG_CONSTRAINT, isUniqueViolation } from "../../db/errors.js
 import { getRequestLogger } from "../../request-context.js";
 import { pageResult, parsePageQuery, trustedOrigin, uuidSchema, type PageQuery } from "./admin-shared.js";
 import { createMediaRouter } from "./media.js";
+import { createAccountRouter, type SessionActor } from "./account.js";
 import { countRevalidations, notifyRevalidationQueued, queueRevalidation, revalidationForPostChange } from "../../cache/revalidation.js";
 import { hashPassword, verifyPassword } from "../../auth/password.js";
 import { allowLoginAttempt, clearLoginAttempts } from "../../auth/login-rate-limit.js";
@@ -22,6 +23,8 @@ import { mediaAssets } from "../../db/schema/mediaAssets.js";
 
 const SESSION_COOKIE = "mg_admin_session";
 const SESSION_SECONDS = 60 * 60 * 12;
+/** `last_used_at` is refreshed at most this often, so most requests stay read-only. */
+const SESSION_TOUCH_SECONDS = 5 * 60;
 const DUMMY_HASH = `scrypt$${"0".repeat(32)}$${"0".repeat(128)}`;
 
 export const inquiryStatuses = ["new", "contacted", "quoted", "booked", "closed"] as const;
@@ -34,6 +37,7 @@ export type PostStatus = (typeof postStatuses)[number];
 export type AdminActor = { id: string; email: string };
 type InquiryRecord = typeof contactInquiries.$inferSelect;
 type BlogPostRecord = typeof blogPosts.$inferSelect;
+export type LoginClient = { userAgent: string | null };
 type LoginResult =
   | { kind: "success"; actor: AdminActor; token: string }
   | { kind: "invalid" }
@@ -49,8 +53,8 @@ export type CreatePostResult = { kind: "created"; post: BlogPostRecord } | { kin
 export type CoverAsset = { id: string; publicUrl: string; status: string };
 
 export type AdminRouterDependencies = {
-  login: (email: string, password: string, audit: AuditContext) => Promise<LoginResult>;
-  resolveSession: (token: string) => Promise<AdminActor | null>;
+  login: (email: string, password: string, audit: AuditContext, client: LoginClient) => Promise<LoginResult>;
+  resolveSession: (token: string) => Promise<SessionActor | null>;
   revokeSession: (token: string, audit: AuditContext) => Promise<void>;
   getOverview: () => Promise<{
     inquiryCounts: { total: number; new: number };
@@ -187,7 +191,7 @@ function escapeLike(value: string) {
   return value.replace(/[\\%_]/g, "\\$&");
 }
 
-async function createDatabaseSession(email: string, password: string, audit: AuditContext): Promise<LoginResult> {
+async function createDatabaseSession(email: string, password: string, audit: AuditContext, client: LoginClient): Promise<LoginResult> {
   const permitted = await allowLoginAttempt(email);
   if (!permitted) return { kind: "rate-limited" };
 
@@ -219,6 +223,8 @@ async function createDatabaseSession(email: string, password: string, audit: Aud
       userId: user.id,
       tokenHash: digestToken(token),
       expiresAt: new Date(Date.now() + SESSION_SECONDS * 1_000),
+      userAgent: client.userAgent,
+      ipHash: audit.ipHash,
     });
     await recordAudit(tx, { ...audit, actorId: user.id }, {
       action: "auth.login",
@@ -230,9 +236,9 @@ async function createDatabaseSession(email: string, password: string, audit: Aud
   return { kind: "success", actor: { id: user.id, email: user.email }, token };
 }
 
-async function resolveDatabaseSession(token: string): Promise<AdminActor | null> {
+async function resolveDatabaseSession(token: string): Promise<SessionActor | null> {
   const [session] = await getDb()
-    .select({ id: adminUsers.id, email: adminUsers.email })
+    .select({ id: adminUsers.id, email: adminUsers.email, sessionId: adminSessions.id, lastUsedAt: adminSessions.lastUsedAt })
     .from(adminSessions)
     .innerJoin(adminUsers, eq(adminUsers.id, adminSessions.userId))
     .where(
@@ -242,7 +248,14 @@ async function resolveDatabaseSession(token: string): Promise<AdminActor | null>
       ),
     )
     .limit(1);
-  return session ?? null;
+  if (!session) return null;
+  if (Date.now() - session.lastUsedAt.getTime() > SESSION_TOUCH_SECONDS * 1_000) {
+    await getDb()
+      .update(adminSessions)
+      .set({ lastUsedAt: sql`now()` })
+      .where(and(eq(adminSessions.id, session.sessionId), lt(adminSessions.lastUsedAt, sql`now() - make_interval(secs => ${SESSION_TOUCH_SECONDS})`)));
+  }
+  return { id: session.id, email: session.email, sessionId: session.sessionId };
 }
 
 async function revokeDatabaseSession(token: string, audit: AuditContext) {
@@ -472,8 +485,9 @@ function slugConflict(context: Context) {
 export function createAdminRouter(
   dependencies = buildProductionDependencies(),
   mediaRouter = createMediaRouter(),
+  accountRouter = createAccountRouter(),
 ) {
-  const router = new Hono<{ Variables: { admin: AdminActor } }>();
+  const router = new Hono<{ Variables: { admin: SessionActor } }>();
 
   router.use("*", async (context, next) => {
     if (context.req.path.endsWith("/auth/login") || context.req.path.endsWith("/auth/session")) return next();
@@ -499,7 +513,9 @@ export function createAdminRouter(
       return context.json({ success: false as const, message: "Enter a valid email and password.", responseCode: 400 }, 400);
     }
     try {
-      const result = await dependencies.login(parsed.data.email, parsed.data.password, auditContextFrom(context, null));
+      const result = await dependencies.login(parsed.data.email, parsed.data.password, auditContextFrom(context, null), {
+        userAgent: context.req.header("user-agent")?.slice(0, 200) || null,
+      });
       if (result.kind === "rate-limited") {
         return context.json({ success: false as const, message: "Too many sign-in attempts. Try again later.", responseCode: 429 }, 429);
       }
@@ -523,7 +539,8 @@ export function createAdminRouter(
   router.get("/auth/session", async (context) => {
     const token = getCookie(context, SESSION_COOKIE);
     const actor = token ? await dependencies.resolveSession(token) : null;
-    const data = actor ? { authenticated: true as const, user: actor } : { authenticated: false as const, user: null };
+    // The session ID stays server-side; the browser only needs to know who is signed in.
+    const data = actor ? { authenticated: true as const, user: { id: actor.id, email: actor.email } } : { authenticated: false as const, user: null };
     return context.json({
       success: true as const,
       message: actor ? "Session is active." : "No active admin session.",
@@ -652,6 +669,7 @@ export function createAdminRouter(
   });
 
   router.route("/media", mediaRouter);
+  router.route("/account", accountRouter);
 
   return router;
 }

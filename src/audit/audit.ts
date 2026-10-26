@@ -9,6 +9,9 @@ export const auditActions = [
   "auth.login",
   "auth.login_failed",
   "auth.logout",
+  "auth.password_change",
+  "auth.password_reset",
+  "auth.session_revoke",
   "inquiry.update",
   "post.create",
   "post.update",
@@ -19,8 +22,12 @@ export const auditActions = [
   "media.upload",
   "media.update",
   "media.delete",
+  "settings.update",
 ] as const;
 export type AuditAction = (typeof auditActions)[number];
+
+export const auditEntityTypes = ["admin_user", "inquiry", "blog_post", "media_asset", "site_settings"] as const;
+export type AuditEntityType = (typeof auditEntityTypes)[number];
 
 /** Who performed an action and from where. IPs are stored only as keyed hashes. */
 export type AuditContext = {
@@ -31,7 +38,7 @@ export type AuditContext = {
 
 export type AuditEntry = {
   action: AuditAction;
-  entityType: "admin_user" | "inquiry" | "blog_post" | "media_asset";
+  entityType: AuditEntityType;
   entityId?: string | null;
   metadata?: Record<string, unknown>;
 };
