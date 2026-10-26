@@ -65,12 +65,17 @@ export const env = z
         .transform((value) => value.replace(/\/+$/, ""))
         .optional(),
     ),
+    /** Shared with the website's /api/revalidate route; signs cache purge requests. */
+    REVALIDATE_SECRET: z.preprocess((value) => (value === "" ? undefined : value), z.string().min(32).optional()),
+    /** Defaults to `${FRONTEND_ORIGIN}/api/revalidate`. */
+    FRONTEND_REVALIDATE_URL: optionalUrl,
     MEDIA_MAX_UPLOAD_BYTES: z.coerce.number().int().positive().max(20 * 1024 * 1024).default(5 * 1024 * 1024),
   })
   .superRefine((value, context) => {
     if (value.NODE_ENV !== "production") return;
     // Uploads are a core admin workflow in production; refuse to start without storage.
-    for (const key of ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET_NAME", "R2_PUBLIC_URL"] as const) {
+    // Without the secret an unpublished article would stay in the public cache for up to an hour.
+    for (const key of ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET_NAME", "R2_PUBLIC_URL", "REVALIDATE_SECRET"] as const) {
       if (!value[key]) context.addIssue({ code: "custom", path: [key], message: `${key} is required in production.` });
     }
   })

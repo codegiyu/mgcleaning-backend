@@ -4,6 +4,7 @@ import { serve } from "@hono/node-server";
 import { app } from "./app.js";
 import { closeDb } from "./db/client.js";
 import { env } from "./env.js";
+import { startRevalidationDispatcher } from "./cache/revalidation.js";
 import { startMediaMaintenance } from "./media/maintenance.js";
 import { logger } from "./logger.js";
 import { closeEmailQueue } from "./queue/email.queue.js";
@@ -12,6 +13,7 @@ import { closeInquiryAbuseRedis } from "./security/inquiry-abuse.js";
 
 const emailWorker = startEmailWorker();
 const mediaMaintenance = startMediaMaintenance();
+const revalidationDispatcher = startRevalidationDispatcher();
 
 const server = serve({
   fetch: app.fetch,
@@ -28,6 +30,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     if (isShuttingDown) return;
     isShuttingDown = true;
     mediaMaintenance.close();
+    revalidationDispatcher.close();
 
     server.close((error) => {
       if (error) {
