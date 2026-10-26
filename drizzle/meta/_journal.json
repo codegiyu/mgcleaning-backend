@@ -64,6 +64,13 @@
       "when": 1793056935285,
       "tag": "0008_scheduled_publishing_and_cache_outbox",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793058113195,
+      "tag": "0009_admin_operations",
+      "breakpoints": true
     }
   ]
 }
