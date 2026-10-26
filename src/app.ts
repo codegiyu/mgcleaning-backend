@@ -9,8 +9,9 @@ app.use(
   "/api/*",
   cors({
     origin: env.FRONTEND_ORIGIN,
-    allowHeaders: ["Content-Type", "Authorization"],
+    allowHeaders: ["Content-Type", "Authorization", "Idempotency-Key", "X-Request-Id"],
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    exposeHeaders: ["X-Request-Id", "Retry-After"],
     credentials: true,
   }),
 );

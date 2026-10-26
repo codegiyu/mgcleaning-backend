@@ -76,6 +76,25 @@ describe("GET /api/v1/health", () => {
   });
 });
 
+describe("CORS", () => {
+  it("allows the headers the website sends with an inquiry", async () => {
+    const response = await app.request("/api/v1/inquiries", {
+      method: "OPTIONS",
+      headers: {
+        Origin: "http://localhost:3000",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "content-type,idempotency-key",
+      },
+    });
+    const allowed = response.headers.get("Access-Control-Allow-Headers")?.toLowerCase() ?? "";
+
+    expect(response.status).toBe(204);
+    expect(allowed).toContain("content-type");
+    expect(allowed).toContain("idempotency-key");
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBe("http://localhost:3000");
+  });
+});
+
 describe("POST /api/v1/inquiries", () => {
   it("validates, saves, and queues a notification for an inquiry", async () => {
     const { router, savedInputs, queuedEmails } = makeInquiryRouter();
