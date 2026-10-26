@@ -57,6 +57,13 @@
       "when": 1793054537215,
       "tag": "0007_media_assets",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793056935285,
+      "tag": "0008_scheduled_publishing_and_cache_outbox",
+      "breakpoints": true
     }
   ]
 }

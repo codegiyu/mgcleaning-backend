@@ -28,6 +28,8 @@ export const blogPosts = pgTable(
     seoDescription: varchar("seo_description", { length: 320 }),
     status: varchar("status", { length: 24 }).notNull().default("draft"),
     publishedAt: timestamp("published_at", { withTimezone: true }),
+    /** Go-live time for `scheduled` posts; null for every other status. */
+    publishAt: timestamp("publish_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -40,6 +42,7 @@ export const blogPosts = pgTable(
     index("blog_posts_category_idx").on(table.category),
     index("blog_posts_service_slug_idx").on(table.serviceSlug),
     index("blog_posts_cover_media_id_idx").on(table.coverMediaId),
+    index("blog_posts_status_publish_at_idx").on(table.status, table.publishAt),
   ],
 );
 

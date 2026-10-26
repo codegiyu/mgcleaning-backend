@@ -5,3 +5,4 @@ export * from "./adminSessions.js";
 export * from "./blogPosts.js";
 export * from "./adminAuditEvents.js";
 export * from "./mediaAssets.js";
+export * from "./cacheRevalidations.js";

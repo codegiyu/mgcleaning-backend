@@ -32,6 +32,7 @@ function postFromInput(input: CreateInput) {
     seoDescription: input.seoDescription ?? null,
     status: "draft",
     publishedAt: null,
+    publishAt: null,
     createdAt: new Date("2026-09-14T12:00:00.000Z"),
     updatedAt: new Date("2026-09-14T12:00:00.000Z"),
   };
@@ -173,6 +174,7 @@ function storedPost(overrides: Partial<Parameters<typeof planPostPatch>[0]> = {}
     seoDescription: null,
     status: "draft",
     publishedAt: null,
+    publishAt: null,
     createdAt: new Date("2026-09-14T12:00:00.000Z"),
     updatedAt: new Date("2026-09-14T12:00:00.000Z"),
     ...overrides,
