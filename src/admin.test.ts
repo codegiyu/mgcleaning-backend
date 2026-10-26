@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createAdminRouter,
   createPublicBlogRouter,
+  planPostPatch,
   type AdminRouterDependencies,
 } from "./routes/v1/admin.js";
 
@@ -43,7 +44,7 @@ function admin(dependencies: Partial<AdminRouterDependencies> = {}) {
         updatedAt: new Date("2026-09-14T12:00:00.000Z"),
       };
     },
-    async updatePost() { return null; },
+    async updatePost() { return { kind: "not-found" }; },
     async listPublishedPosts() { return { items: [], total: 0 }; },
     async getPublishedPost() { return null; },
   };
@@ -99,7 +100,7 @@ describe("admin authentication", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(revokeSession).toHaveBeenCalledWith(token);
+    expect(revokeSession).toHaveBeenCalledWith(token, expect.any(Object));
     expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
   });
 
@@ -152,25 +153,9 @@ describe("admin blog editor", () => {
     expect(response.status).toBe(404);
   });
 
-  it("requires editorial evidence before publishing an article", async () => {
-    const updatePost = vi.fn(async () => null);
-    const response = await admin({
-      async getPost() {
-        return {
-          id: "01c47f57-ea8c-4583-aad4-9ec537f4ff41",
-          ...validPostPayload,
-          coverImageUrl: null,
-          coverImageAlt: null,
-          seoTitle: null,
-          seoDescription: null,
-          status: "draft" as const,
-          publishedAt: null,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        };
-      },
-      updatePost,
-    }).request("/blog/posts/01c47f57-ea8c-4583-aad4-9ec537f4ff41", {
+  it("reports missing editorial evidence returned by the publish gate", async () => {
+    const updatePost = vi.fn(async () => ({ kind: "incomplete" as const, missing: ["cover image", "cover image alt text"] }));
+    const response = await admin({ updatePost }).request(`/blog/posts/${postId}`, {
       method: "PATCH",
       headers: { ...authHeaders, "Content-Type": "application/json" },
       body: JSON.stringify({ status: "published" }),
@@ -178,9 +163,25 @@ describe("admin blog editor", () => {
 
     expect(response.status).toBe(400);
     expect((await response.json()).message).toContain("cover image");
-    expect(updatePost).not.toHaveBeenCalled();
+    expect(updatePost).toHaveBeenCalledOnce();
   });
 });
+
+function storedPost(overrides: Partial<Parameters<typeof planPostPatch>[0]> = {}): Parameters<typeof planPostPatch>[0] {
+  return {
+    id: postId,
+    ...validPostPayload,
+    coverImageUrl: "https://media.example.test/cover.webp",
+    coverImageAlt: "A freshly cleaned sofa",
+    seoTitle: null,
+    seoDescription: null,
+    status: "draft",
+    publishedAt: null,
+    createdAt: new Date("2026-09-14T12:00:00.000Z"),
+    updatedAt: new Date("2026-09-14T12:00:00.000Z"),
+    ...overrides,
+  };
+}
 
 /** Mirrors how Drizzle wraps a postgres-js unique violation. */
 function uniqueViolation(constraint: string) {
@@ -188,6 +189,42 @@ function uniqueViolation(constraint: string) {
     cause: Object.assign(new Error("duplicate key value"), { code: "23505", constraint_name: constraint }),
   });
 }
+
+describe("post patch planning", () => {
+  const now = new Date("2026-10-26T12:00:00.000Z");
+
+  it("refuses to publish without editorial evidence", () => {
+    const plan = planPostPatch(storedPost({ coverImageUrl: null }), { status: "published" }, now);
+    expect(plan).toEqual({ kind: "incomplete", missing: ["cover image"] });
+  });
+
+  it("refuses to clear the cover alt text of a live article", () => {
+    const plan = planPostPatch(storedPost({ status: "published" }), { coverImageAlt: "" }, now);
+    expect(plan).toEqual({ kind: "incomplete", missing: ["cover image alt text"] });
+  });
+
+  it("stamps the publish time and audits a first publish", () => {
+    const plan = planPostPatch(storedPost(), { status: "published" }, now);
+    expect(plan).toMatchObject({ kind: "apply", action: "post.publish", statusFrom: "draft", statusTo: "published" });
+    expect(plan.kind === "apply" && plan.update.publishedAt).toEqual(now);
+  });
+
+  it("keeps the original publish time when a live article is edited", () => {
+    const plan = planPostPatch(
+      storedPost({ status: "published", publishedAt: new Date("2026-10-01T09:00:00.000Z") }),
+      { title: "A clearer title" },
+      now,
+    );
+    expect(plan).toMatchObject({ kind: "apply", action: "post.update" });
+    expect(plan.kind === "apply" && "publishedAt" in plan.update).toBe(false);
+  });
+
+  it("clears the publish time when an article is unpublished", () => {
+    const plan = planPostPatch(storedPost({ status: "published" }), { status: "draft" }, now);
+    expect(plan).toMatchObject({ kind: "apply", action: "post.unpublish" });
+    expect(plan.kind === "apply" && plan.update.publishedAt).toBeNull();
+  });
+});
 
 describe("admin blog error mapping", () => {
   it("returns 409 for a slug unique violation", async () => {
@@ -225,5 +262,27 @@ describe("admin blog error mapping", () => {
       body: JSON.stringify(validPostPayload),
     });
     expect(response.status).toBe(500);
+  });
+});
+
+describe("admin audit context", () => {
+  it("attributes inquiry updates to the signed-in actor", async () => {
+    const updateInquiry = vi.fn(async () => null);
+    await admin({ updateInquiry }).request("/inquiries/5a3c2a3e-8a0b-4d8e-9a43-1c7c5b5f9a10", {
+      method: "PATCH",
+      headers: { ...authHeaders, "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "contacted" }),
+    });
+    expect(updateInquiry).toHaveBeenCalledWith(
+      "5a3c2a3e-8a0b-4d8e-9a43-1c7c5b5f9a10",
+      { status: "contacted" },
+      { actorId: actor.id, ipHash: null, requestId: null },
+    );
+  });
+
+  it("attributes logout to the session owner", async () => {
+    const revokeSession = vi.fn(async () => {});
+    await admin({ revokeSession }).request("/auth/logout", { method: "POST", headers: authHeaders });
+    expect(revokeSession).toHaveBeenCalledWith(token, expect.objectContaining({ actorId: actor.id }));
   });
 });

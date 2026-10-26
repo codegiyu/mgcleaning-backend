@@ -1,6 +1,7 @@
 import { Writable } from "node:stream";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
+import { changedFields, hashAuditIp } from "./audit/audit.js";
 import { isUniqueViolation } from "./db/errors.js";
 import { createLogger } from "./logger.js";
 import { requestContext, type RequestContextVariables } from "./request-context.js";
@@ -67,6 +68,17 @@ describe("client IP resolution", () => {
     expect(clientIpFromForwardedFor("6.6.6.6", 0)).toBeNull();
     expect(clientIpFromForwardedFor("198.51.100.7", 2)).toBeNull();
     expect(clientIpFromForwardedFor(undefined, 1)).toBeNull();
+  });
+});
+
+describe("audit helpers", () => {
+  it("hashes IPs and records only changed field names", () => {
+    expect(hashAuditIp("unknown")).toBeNull();
+    expect(hashAuditIp("198.51.100.7")).toMatch(/^[0-9a-f]{64}$/);
+    expect(changedFields({ status: "contacted", internalNote: "Called back", ignored: undefined })).toEqual([
+      "internalNote",
+      "status",
+    ]);
   });
 });
 

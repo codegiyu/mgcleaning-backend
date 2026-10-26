@@ -3,8 +3,10 @@ import { and, count, desc, eq, gt, ilike, or } from "drizzle-orm";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
+import { auditContextFrom, changedFields, recordAudit, type AuditAction, type AuditContext } from "../../audit/audit.js";
 import { env } from "../../env.js";
 import { BLOG_POST_SLUG_CONSTRAINT, isUniqueViolation } from "../../db/errors.js";
+import { getRequestLogger } from "../../request-context.js";
 import { hashPassword, verifyPassword } from "../../auth/password.js";
 import { allowLoginAttempt, clearLoginAttempts } from "../../auth/login-rate-limit.js";
 import { getDb } from "../../db/client.js";
@@ -31,11 +33,15 @@ type LoginResult =
   | { kind: "invalid" }
   | { kind: "rate-limited" };
 type PageQuery = { page: number; pageSize: number; query?: string };
+export type UpdatePostResult =
+  | { kind: "updated"; post: BlogPostRecord }
+  | { kind: "not-found" }
+  | { kind: "incomplete"; missing: string[] };
 
 export type AdminRouterDependencies = {
-  login: (email: string, password: string) => Promise<LoginResult>;
+  login: (email: string, password: string, audit: AuditContext) => Promise<LoginResult>;
   resolveSession: (token: string) => Promise<AdminActor | null>;
-  revokeSession: (token: string) => Promise<void>;
+  revokeSession: (token: string, audit: AuditContext) => Promise<void>;
   getOverview: () => Promise<{
     inquiryCounts: { total: number; new: number };
     postCounts: { draft: number; published: number };
@@ -49,14 +55,16 @@ export type AdminRouterDependencies = {
   updateInquiry: (
     id: string,
     patch: { status?: InquiryStatus; internalNote?: string | null },
+    audit: AuditContext,
   ) => Promise<InquiryRecord | null>;
   listPosts: (query: PageQuery & { status: PostStatus | "all" }) => Promise<{
     items: BlogPostRecord[];
     total: number;
   }>;
   getPost: (id: string) => Promise<BlogPostRecord | null>;
-  createPost: (input: BlogPostInput) => Promise<BlogPostRecord>;
-  updatePost: (id: string, patch: BlogPostPatch) => Promise<BlogPostRecord | null>;
+  createPost: (input: BlogPostInput, audit: AuditContext) => Promise<BlogPostRecord>;
+  /** Validates and applies the patch against a locked row so a concurrent edit cannot publish an incomplete post. */
+  updatePost: (id: string, patch: BlogPostPatch, audit: AuditContext) => Promise<UpdatePostResult>;
   listPublishedPosts: (query: PageQuery & { category?: string }) => Promise<{
     items: BlogPostRecord[];
     total: number;
@@ -92,13 +100,40 @@ const blogPostPatchSchema = blogPostInputSchema
 type BlogPostInput = z.infer<typeof blogPostInputSchema>;
 type BlogPostPatch = z.infer<typeof blogPostPatchSchema>;
 
-function publishValidation(post: { authorName?: string | null; serviceSlug?: string | null; coverImageUrl?: string | null; coverImageAlt?: string | null }) {
+export function publishValidation(post: { authorName?: string | null; serviceSlug?: string | null; coverImageUrl?: string | null; coverImageAlt?: string | null }) {
   const missing: string[] = [];
   if (!post.authorName?.trim()) missing.push("author");
   if (!post.serviceSlug?.trim()) missing.push("related service");
   if (!post.coverImageUrl?.trim()) missing.push("cover image");
   if (!post.coverImageAlt?.trim()) missing.push("cover image alt text");
   return missing;
+}
+
+type PostPatchPlan =
+  | { kind: "incomplete"; missing: string[] }
+  | { kind: "apply"; update: Partial<typeof blogPosts.$inferInsert>; action: AuditAction; statusFrom: string; statusTo: string };
+
+/**
+ * Pure decision for a post patch. The publish gate applies to the merged row
+ * whenever the result is published, so clearing a cover on a live post is refused too.
+ */
+export function planPostPatch(existing: BlogPostRecord, patch: BlogPostPatch, now: Date): PostPatchPlan {
+  const statusFrom = existing.status;
+  const statusTo = patch.status ?? existing.status;
+  if (statusTo === "published") {
+    const missing = publishValidation({ ...existing, ...patch });
+    if (missing.length) return { kind: "incomplete", missing };
+  }
+  const update: Partial<typeof blogPosts.$inferInsert> = { ...patch, updatedAt: now };
+  if (statusTo === "published" && statusFrom !== "published") update.publishedAt = now;
+  if (statusTo === "draft") update.publishedAt = null;
+  let action: AuditAction = "post.update";
+  if (statusTo !== statusFrom) {
+    if (statusTo === "published") action = "post.publish";
+    else if (statusFrom === "published" && statusTo === "draft") action = "post.unpublish";
+    else if (statusTo === "archived") action = "post.archive";
+  }
+  return { kind: "apply", update, action, statusFrom, statusTo };
 }
 
 const loginSchema = z.object({
@@ -139,7 +174,7 @@ function parsePageQuery(context: Context) {
   });
 }
 
-async function createDatabaseSession(email: string, password: string): Promise<LoginResult> {
+async function createDatabaseSession(email: string, password: string, audit: AuditContext): Promise<LoginResult> {
   const permitted = await allowLoginAttempt(email);
   if (!permitted) return { kind: "rate-limited" };
 
@@ -150,14 +185,33 @@ async function createDatabaseSession(email: string, password: string): Promise<L
     .where(eq(adminUsers.email, normalizedEmail))
     .limit(1);
   const passwordIsValid = await verifyPassword(password, user?.passwordHash ?? DUMMY_HASH);
-  if (!user || !passwordIsValid) return { kind: "invalid" };
+  if (!user || !passwordIsValid) {
+    // Only failures against a real account are audited: the per-email rate limit
+    // bounds those rows, whereas unknown-email attempts could be generated without limit.
+    if (user) {
+      await recordAudit(getDb(), { ...audit, actorId: user.id }, {
+        action: "auth.login_failed",
+        entityType: "admin_user",
+        entityId: user.id,
+        metadata: { reason: "invalid_password" },
+      });
+    }
+    return { kind: "invalid" };
+  }
   await clearLoginAttempts(email);
 
   const token = randomBytes(32).toString("base64url");
-  await getDb().insert(adminSessions).values({
-    userId: user.id,
-    tokenHash: digestToken(token),
-    expiresAt: new Date(Date.now() + SESSION_SECONDS * 1_000),
+  await getDb().transaction(async (tx) => {
+    await tx.insert(adminSessions).values({
+      userId: user.id,
+      tokenHash: digestToken(token),
+      expiresAt: new Date(Date.now() + SESSION_SECONDS * 1_000),
+    });
+    await recordAudit(tx, { ...audit, actorId: user.id }, {
+      action: "auth.login",
+      entityType: "admin_user",
+      entityId: user.id,
+    });
   });
 
   return { kind: "success", actor: { id: user.id, email: user.email }, token };
@@ -178,8 +232,19 @@ async function resolveDatabaseSession(token: string): Promise<AdminActor | null>
   return session ?? null;
 }
 
-async function revokeDatabaseSession(token: string) {
-  await getDb().delete(adminSessions).where(eq(adminSessions.tokenHash, digestToken(token)));
+async function revokeDatabaseSession(token: string, audit: AuditContext) {
+  await getDb().transaction(async (tx) => {
+    const revoked = await tx
+      .delete(adminSessions)
+      .where(eq(adminSessions.tokenHash, digestToken(token)))
+      .returning({ userId: adminSessions.userId });
+    if (!revoked.length) return;
+    await recordAudit(tx, audit, {
+      action: "auth.logout",
+      entityType: "admin_user",
+      entityId: revoked[0]?.userId ?? null,
+    });
+  });
 }
 
 function buildProductionDependencies(): AdminRouterDependencies {
@@ -243,13 +308,31 @@ function buildProductionDependencies(): AdminRouterDependencies {
         .limit(1);
       return item ?? null;
     },
-    async updateInquiry(id, patch) {
-      const [item] = await getDb()
-        .update(contactInquiries)
-        .set({ ...patch, updatedAt: new Date() })
-        .where(eq(contactInquiries.id, id))
-        .returning();
-      return item ?? null;
+    async updateInquiry(id, patch, audit) {
+      return getDb().transaction(async (tx) => {
+        const [existing] = await tx
+          .select({ status: contactInquiries.status })
+          .from(contactInquiries)
+          .where(eq(contactInquiries.id, id))
+          .for("update");
+        if (!existing) return null;
+        const [item] = await tx
+          .update(contactInquiries)
+          .set({ ...patch, updatedAt: new Date() })
+          .where(eq(contactInquiries.id, id))
+          .returning();
+        if (!item) return null;
+        await recordAudit(tx, audit, {
+          action: "inquiry.update",
+          entityType: "inquiry",
+          entityId: id,
+          metadata: {
+            fields: changedFields(patch),
+            ...(patch.status && patch.status !== existing.status ? { statusFrom: existing.status, statusTo: patch.status } : {}),
+          },
+        });
+        return item;
+      });
     },
     async listPosts(query) {
       const conditions = [];
@@ -276,22 +359,42 @@ function buildProductionDependencies(): AdminRouterDependencies {
       const [item] = await getDb().select().from(blogPosts).where(eq(blogPosts.id, id)).limit(1);
       return item ?? null;
     },
-    async createPost(input) {
-      const [post] = await getDb()
-        .insert(blogPosts)
-        .values({ ...input, serviceSlug: input.serviceSlug, authorName: input.authorName, coverImageUrl: input.coverImageUrl ?? null, coverImageAlt: input.coverImageAlt ?? null, seoTitle: input.seoTitle ?? null, seoDescription: input.seoDescription ?? null })
-        .returning();
-      if (!post) throw new Error("Blog post insert returned no row.");
-      return post;
+    async createPost(input, audit) {
+      return getDb().transaction(async (tx) => {
+        const [post] = await tx
+          .insert(blogPosts)
+          .values({ ...input, serviceSlug: input.serviceSlug, authorName: input.authorName, coverImageUrl: input.coverImageUrl ?? null, coverImageAlt: input.coverImageAlt ?? null, seoTitle: input.seoTitle ?? null, seoDescription: input.seoDescription ?? null })
+          .returning();
+        if (!post) throw new Error("Blog post insert returned no row.");
+        await recordAudit(tx, audit, {
+          action: "post.create",
+          entityType: "blog_post",
+          entityId: post.id,
+          metadata: { slug: post.slug },
+        });
+        return post;
+      });
     },
-    async updatePost(id, patch) {
-      const existing = await this.getPost(id);
-      if (!existing) return null;
-      const update: Partial<typeof blogPosts.$inferInsert> = { ...patch, updatedAt: new Date() };
-      if (patch.status === "published" && existing.status !== "published") update.publishedAt = new Date();
-      if (patch.status === "draft") update.publishedAt = null;
-      const [post] = await getDb().update(blogPosts).set(update).where(eq(blogPosts.id, id)).returning();
-      return post ?? null;
+    async updatePost(id, patch, audit) {
+      return getDb().transaction(async (tx): Promise<UpdatePostResult> => {
+        const [existing] = await tx.select().from(blogPosts).where(eq(blogPosts.id, id)).for("update");
+        if (!existing) return { kind: "not-found" };
+        const plan = planPostPatch(existing, patch, new Date());
+        if (plan.kind === "incomplete") return plan;
+        const [post] = await tx.update(blogPosts).set(plan.update).where(eq(blogPosts.id, id)).returning();
+        if (!post) return { kind: "not-found" };
+        await recordAudit(tx, audit, {
+          action: plan.action,
+          entityType: "blog_post",
+          entityId: id,
+          metadata: {
+            slug: post.slug,
+            fields: changedFields(patch),
+            ...(plan.statusFrom !== plan.statusTo ? { statusFrom: plan.statusFrom, statusTo: plan.statusTo } : {}),
+          },
+        });
+        return { kind: "updated", post };
+      });
     },
     async listPublishedPosts(query) {
       const conditions = [eq(blogPosts.status, "published")];
@@ -357,7 +460,7 @@ export function createAdminRouter(dependencies = buildProductionDependencies()) 
       return context.json({ success: false as const, message: "Enter a valid email and password.", responseCode: 400 }, 400);
     }
     try {
-      const result = await dependencies.login(parsed.data.email, parsed.data.password);
+      const result = await dependencies.login(parsed.data.email, parsed.data.password, auditContextFrom(context, null));
       if (result.kind === "rate-limited") {
         return context.json({ success: false as const, message: "Too many sign-in attempts. Try again later.", responseCode: 429 }, 429);
       }
@@ -372,7 +475,8 @@ export function createAdminRouter(dependencies = buildProductionDependencies()) 
         maxAge: SESSION_SECONDS,
       });
       return context.json({ success: true as const, message: "Signed in.", responseCode: 200, data: result.actor });
-    } catch {
+    } catch (error) {
+      getRequestLogger(context).error({ err: error }, "admin sign-in failed");
       return context.json({ success: false as const, message: "Sign-in is temporarily unavailable.", responseCode: 503 }, 503);
     }
   });
@@ -394,7 +498,7 @@ export function createAdminRouter(dependencies = buildProductionDependencies()) 
       return context.json({ success: false as const, message: "Request origin is not allowed.", responseCode: 403 }, 403);
     }
     const token = getCookie(context, SESSION_COOKIE);
-    if (token) await dependencies.revokeSession(token);
+    if (token) await dependencies.revokeSession(token, auditContextFrom(context, context.get("admin").id));
     deleteCookie(context, SESSION_COOKIE, { path: "/api/v1/admin", secure: env.NODE_ENV === "production", sameSite: "Lax" });
     return context.json({ success: true as const, message: "Signed out.", responseCode: 200, data: { signedOut: true } });
   });
@@ -434,7 +538,7 @@ export function createAdminRouter(dependencies = buildProductionDependencies()) 
     if (!uuidSchema.safeParse(id).success || !parsed.success) {
       return context.json({ success: false as const, message: "Please check the inquiry update and try again.", responseCode: 400 }, 400);
     }
-    const item = await dependencies.updateInquiry(id, parsed.data);
+    const item = await dependencies.updateInquiry(id, parsed.data, auditContextFrom(context, context.get("admin").id));
     if (!item) return context.json({ success: false as const, message: "Inquiry not found.", responseCode: 404 }, 404);
     return context.json({ success: true as const, message: "Inquiry updated.", responseCode: 200, data: item });
   });
@@ -469,7 +573,7 @@ export function createAdminRouter(dependencies = buildProductionDependencies()) 
       return context.json({ success: false as const, message: "Please check the article fields and try again.", responseCode: 400 }, 400);
     }
     try {
-      const post = await dependencies.createPost(parsed.data);
+      const post = await dependencies.createPost(parsed.data, auditContextFrom(context, context.get("admin").id));
       return context.json({ success: true as const, message: "Draft created.", responseCode: 201, data: post }, 201);
     } catch (error) {
       if (isUniqueViolation(error, BLOG_POST_SLUG_CONSTRAINT)) return slugConflict(context);
@@ -487,20 +591,20 @@ export function createAdminRouter(dependencies = buildProductionDependencies()) 
     if (!uuidSchema.safeParse(id).success || !parsed.success) {
       return context.json({ success: false as const, message: "Please check the article fields and try again.", responseCode: 400 }, 400);
     }
+    let result: UpdatePostResult;
     try {
-      if (parsed.data.status === "published") {
-        const missing = publishValidation({ ...await dependencies.getPost(id), ...parsed.data });
-        if (missing.length) {
-          return context.json({ success: false as const, message: `Add ${missing.join(", ")} before publishing this article.`, responseCode: 400 }, 400);
-        }
-      }
-      const post = await dependencies.updatePost(id, parsed.data);
-      if (!post) return context.json({ success: false as const, message: "Blog post not found.", responseCode: 404 }, 404);
-      return context.json({ success: true as const, message: "Blog post updated.", responseCode: 200, data: post });
+      result = await dependencies.updatePost(id, parsed.data, auditContextFrom(context, context.get("admin").id));
     } catch (error) {
       if (isUniqueViolation(error, BLOG_POST_SLUG_CONSTRAINT)) return slugConflict(context);
       throw error;
     }
+    if (result.kind === "not-found") {
+      return context.json({ success: false as const, message: "Blog post not found.", responseCode: 404 }, 404);
+    }
+    if (result.kind === "incomplete") {
+      return context.json({ success: false as const, message: `Add ${result.missing.join(", ")} before publishing this article.`, responseCode: 400 }, 400);
+    }
+    return context.json({ success: true as const, message: "Blog post updated.", responseCode: 200, data: result.post });
   });
 
   return router;
