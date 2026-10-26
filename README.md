@@ -40,6 +40,7 @@ Set these Compose variables in Coolify before deployment:
 - `INQUIRY_SECURITY_SECRET`: random secret used to hash rate-limit and duplicate-detection identifiers.
 - `TRUST_PROXY_HOPS`: number of trusted reverse-proxy hops used to resolve visitor IPs; use `1` behind the documented Coolify proxy and keep it `0` for direct local requests. The client IP is read that many entries from the right of `X-Forwarded-For`, so client-supplied entries are ignored.
 - `LOG_LEVEL` (optional): pino log level, `info` by default.
+- `REVALIDATE_SECRET`: random 32+ character secret shared with the website's runtime `REVALIDATE_SECRET`, used to sign cache purges. Optionally set `FRONTEND_REVALIDATE_URL` if the website should be reached on an internal address.
 - `TURNSTILE_MODE` and `TURNSTILE_SECRET_KEY`: leave Turnstile off until abuse warrants it, then configure the server secret and the matching frontend site key.
 - `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD`: set only for the initial bootstrap.
 
@@ -52,6 +53,12 @@ The public Next.js app is deployed separately from the `mgcleaning` repository a
 The admin API includes session login/logout, an inquiry inbox with private status/notes, and blog draft/publish operations. Create the first admin after migrations: set `BOOTSTRAP_ADMIN_EMAIL` and a unique `BOOTSTRAP_ADMIN_PASSWORD` of at least 12 characters in `.env`, then run `npm run admin:bootstrap`. The command stores a scrypt password hash; remove the bootstrap password from `.env` after it succeeds. It will not reset an existing account. Sessions are random opaque values stored as hashes, expire after 12 hours, and are returned only in an HttpOnly cookie. Admin writes require the configured `FRONTEND_ORIGIN`.
 
 Published articles are exposed at `GET /api/v1/blog` and `GET /api/v1/blog/:slug`. Public reads only return published posts. Admin post content is plain text with limited headings, bold, and bullet-list conventions; raw HTML is not interpreted. Each article records an author name and optional related service slug. Publishing requires an author, related service, a verified cover upload, and cover-image alt text. Posts reference their cover by `coverMediaId`; the public cover URL is copied from the verified media asset on the server, and client-supplied cover URLs are rejected.
+
+## Scheduled publishing and website cache
+
+Posts can be `draft`, `scheduled`, `published`, or `archived`. Scheduling (`PATCH /admin/blog/posts/:id` with `status: "scheduled"` and an ISO `publishAt` that includes a UTC offset) applies the same checks as publishing, and the time must be in the future and at most a year ahead. Every 30 seconds the API publishes due posts with one conditional `UPDATE … WHERE status = 'scheduled' AND publish_at <= now()`. It uses the database clock, and running it twice publishes a post once. Moving a post out of `scheduled` cancels the schedule.
+
+The website caches published-article reads for up to an hour and purges them on demand. Any change that affects the public site (publish, edit while live, unpublish, archive, slug change, or a scheduled publish) writes a row to `cache_revalidations` in the same transaction. A dispatcher in the API process claims due rows (`FOR UPDATE SKIP LOCKED`) and POSTs them to the website's `/api/revalidate` with an HMAC-SHA256 signature over `timestamp.body` using `REVALIDATE_SECRET`. Purges that remove a public article expire the cache immediately; other changes refresh in the background. Failed deliveries retry with backoff (10 seconds doubling up to 15 minutes) and become `dead_letter` after 8 attempts; the admin overview reports pending and dead-lettered purges. If the website stays unreachable, the hourly cache lifetime bounds staleness.
 
 ## Media uploads (Cloudflare R2)
 
