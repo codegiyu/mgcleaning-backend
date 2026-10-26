@@ -17,6 +17,11 @@ const validInquiry: CreateInquiryInput = {
   message: "Please contact me about cleaning my sofa.",
 };
 
+/** A UTC calendar date `days` from today, so date-window validation never ages out. */
+function futureDate(days: number) {
+  return new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+}
+
 function makeInquiryRouter(
   overrides: Partial<InquiryRouterDependencies> = {},
 ) {
@@ -126,7 +131,7 @@ describe("POST /api/v1/inquiries", () => {
       email: "mary@example.test",
       inquiryType: "booking",
       serviceInterest: "Upholstery cleaning",
-      preferredDate: "2026-10-04",
+      preferredDate: futureDate(7),
       preferredTime: "Morning (8am–12pm)",
       preferredContactMethod: "whatsapp",
       location: "Lekki Phase 1, Lagos",
