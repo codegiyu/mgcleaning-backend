@@ -2,6 +2,7 @@ import "dotenv/config";
 
 import { eq } from "drizzle-orm";
 import { hashPassword } from "../auth/password.js";
+import { passwordPolicyError } from "../auth/password-policy.js";
 import { closeDb, getDb } from "../db/client.js";
 import { adminUsers } from "../db/schema/adminUsers.js";
 
@@ -11,9 +12,8 @@ async function main() {
   if (!email || !password) {
     throw new Error("Set BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD before bootstrapping an admin.");
   }
-  if (password.length < 12 || password.length > 200) {
-    throw new Error("The initial admin password must be between 12 and 200 characters.");
-  }
+  const policyError = passwordPolicyError(password);
+  if (policyError) throw new Error(`Initial admin password: ${policyError}`);
   const [existing] = await getDb().select({ id: adminUsers.id }).from(adminUsers).where(eq(adminUsers.email, email)).limit(1);
   if (existing) {
     console.info(`Admin ${email} already exists; no changes were made.`);

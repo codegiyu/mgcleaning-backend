@@ -14,7 +14,9 @@
     "db:migrate:runtime": "node dist/db/migrate.js",
     "db:studio": "drizzle-kit studio",
     "admin:bootstrap": "tsx src/scripts/bootstrapAdmin.ts",
-    "admin:bootstrap:runtime": "node dist/scripts/bootstrapAdmin.js"
+    "admin:bootstrap:runtime": "node dist/scripts/bootstrapAdmin.js",
+    "admin:reset-password": "tsx src/scripts/resetAdminPassword.ts",
+    "admin:reset-password:runtime": "node dist/scripts/resetAdminPassword.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1157.0",
