@@ -69,12 +69,21 @@ function normalizeIp(value: string) {
   return normalized.startsWith("::ffff:") ? normalized.slice(7) : normalized;
 }
 
+/**
+ * Each trusted proxy appends the address it received the request from, so the
+ * client is `trustedHops` entries from the right. Entries further left are
+ * client-supplied and must not be trusted.
+ */
+export function clientIpFromForwardedFor(header: string | undefined, trustedHops: number) {
+  if (!header || trustedHops < 1) return null;
+  const entries = header.split(",").map((entry) => entry.trim()).filter(Boolean);
+  const candidate = entries[entries.length - trustedHops];
+  return candidate ? normalizeIp(candidate) : null;
+}
+
 export function resolveClientIp(context: Context) {
-  if (env.TRUST_PROXY_HOPS > 0) {
-    const forwarded = context.req.header("x-forwarded-for");
-    const firstForwarded = forwarded?.split(",")[0];
-    if (firstForwarded?.trim()) return normalizeIp(firstForwarded);
-  }
+  const forwardedIp = clientIpFromForwardedFor(context.req.header("x-forwarded-for"), env.TRUST_PROXY_HOPS);
+  if (forwardedIp) return forwardedIp;
 
   try {
     const address = getConnInfo(context).remote.address;
