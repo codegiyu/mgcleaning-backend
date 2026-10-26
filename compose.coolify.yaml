@@ -53,6 +53,7 @@ services:
     environment:
       NODE_ENV: production
       API_PORT: "4000"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:?}
       DATABASE_URL: postgresql://${SERVICE_USER_POSTGRES}:${SERVICE_PASSWORD_64_POSTGRES}@postgres:5432/mgcleaning
       REDIS_URL: redis://redis:6379

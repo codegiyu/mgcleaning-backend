@@ -5,6 +5,8 @@ import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import type { Context } from "hono";
 import { env } from "../../env.js";
+import { logger } from "../../logger.js";
+import { getRequestLogger } from "../../request-context.js";
 import { getDb } from "../../db/client.js";
 import { contactInquiries } from "../../db/schema/contactInquiries.js";
 import { emailOutbox, type NewEmailOutbox } from "../../db/schema/emailOutbox.js";
@@ -284,10 +286,7 @@ const productionDependencies: InquiryRouterDependencies = {
   },
   notificationRecipient: env.INQUIRY_NOTIFICATION_TO,
   onNotificationQueueFailure(inquiryId, outboxId) {
-    console.warn("Inquiry email was saved but its notification was not queued.", {
-      inquiryId,
-      outboxId,
-    });
+    logger.warn({ inquiryId, outboxId }, "inquiry saved but its notification was not queued");
   },
   allowRequest: ({ ip, email, phone }) => allowInquiryRequest({ ip, email, phone }),
   resolveClientIp,
@@ -359,7 +358,7 @@ export function createV1Router(
     try {
       rateLimit = await allowRequest({ ip: clientIp, email: parsed.data.email, phone: parsed.data.phone });
     } catch {
-      console.error("Inquiry rate limiter unavailable.");
+      getRequestLogger(context).error("inquiry rate limiter unavailable");
       return context.json({ success: false as const, message: "Requests are temporarily unavailable. Please try again shortly.", responseCode: 503 }, 503);
     }
     if (!rateLimit.allowed) {
@@ -372,17 +371,17 @@ export function createV1Router(
     }
 
     if (parsed.data.companyWebsite) {
-      console.info("Inquiry rejected by honeypot.");
+      getRequestLogger(context).info("inquiry rejected by honeypot");
       return context.json({ success: false as const, message: "Please check the form details and try again.", responseCode: 400 }, 400);
     }
 
     const spamScore = scoreInquiry(parsed.data);
     if (spamScore.band === "high") {
-      console.info("Inquiry rejected by spam score.", { score: spamScore.score, signals: spamScore.signals });
+      getRequestLogger(context).info({ score: spamScore.score, signals: spamScore.signals }, "inquiry rejected by spam score");
       return context.json({ success: false as const, message: "Please check the form details and try again.", responseCode: 400 }, 400);
     }
     if (spamScore.band === "medium" && !(await verifyChallenge(parsed.data.turnstileToken, clientIp))) {
-      console.info("Inquiry rejected by challenge verification.", { score: spamScore.score, signals: spamScore.signals });
+      getRequestLogger(context).info({ score: spamScore.score, signals: spamScore.signals }, "inquiry rejected by challenge verification");
       return context.json({ success: false as const, message: "Please complete the verification and try again.", responseCode: 403 }, 403);
     }
 
@@ -391,7 +390,7 @@ export function createV1Router(
     try {
       fingerprintClaim = await claimFingerprint(fingerprint, idempotencyKey);
     } catch {
-      console.error("Inquiry duplicate protection unavailable.");
+      getRequestLogger(context).error("inquiry duplicate protection unavailable");
       return context.json({ success: false as const, message: "Requests are temporarily unavailable. Please try again shortly.", responseCode: 503 }, 503);
     }
     if (!fingerprintClaim.claimed) {

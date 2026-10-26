@@ -14,6 +14,10 @@ export const env = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     API_PORT: z.coerce.number().int().positive().default(4000),
+    LOG_LEVEL: z.preprocess(
+      (value) => (value === "" ? undefined : value),
+      z.enum(["trace", "debug", "info", "warn", "error", "fatal", "silent"]).optional(),
+    ),
     FRONTEND_ORIGIN: z.string().url().default("http://localhost:3000"),
     DATABASE_URL: optionalUrl,
     REDIS_URL: optionalUrl,

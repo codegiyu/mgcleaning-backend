@@ -73,6 +73,7 @@ describe("GET /api/v1/health", () => {
         status: "ok",
       },
     });
+    expect(response.headers.get("X-Request-Id")).toBeTruthy();
   });
 });
 

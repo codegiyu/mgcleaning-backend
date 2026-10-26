@@ -4,6 +4,7 @@ import { serve } from "@hono/node-server";
 import { app } from "./app.js";
 import { closeDb } from "./db/client.js";
 import { env } from "./env.js";
+import { logger } from "./logger.js";
 import { closeEmailQueue } from "./queue/email.queue.js";
 import { startEmailWorker } from "./queue/email.worker.js";
 import { closeInquiryAbuseRedis } from "./security/inquiry-abuse.js";
@@ -16,7 +17,7 @@ const server = serve({
   port: env.API_PORT,
 });
 
-console.info(`MG Cleaning API listening on port ${env.API_PORT}.`);
+logger.info({ port: env.API_PORT }, "API listening");
 
 let isShuttingDown = false;
 
@@ -27,7 +28,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 
     server.close((error) => {
       if (error) {
-        console.error("API server shutdown failed", error);
+        logger.error({ err: error }, "API server shutdown failed");
         process.exitCode = 1;
       }
 
@@ -39,7 +40,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       ]).then((results) => {
         for (const result of results) {
           if (result.status === "rejected") {
-            console.error("Backend resource shutdown failed", result.reason);
+            logger.error({ err: result.reason }, "backend resource shutdown failed");
             process.exitCode = 1;
           }
         }
