@@ -15,6 +15,7 @@ export const auditActions = [
   "post.publish",
   "post.unpublish",
   "post.archive",
+  "post.schedule",
   "media.upload",
   "media.update",
   "media.delete",

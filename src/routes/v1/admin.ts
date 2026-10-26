@@ -9,6 +9,7 @@ import { BLOG_POST_SLUG_CONSTRAINT, isUniqueViolation } from "../../db/errors.js
 import { getRequestLogger } from "../../request-context.js";
 import { pageResult, parsePageQuery, trustedOrigin, uuidSchema, type PageQuery } from "./admin-shared.js";
 import { createMediaRouter } from "./media.js";
+import { countRevalidations, notifyRevalidationQueued, queueRevalidation, revalidationForPostChange } from "../../cache/revalidation.js";
 import { hashPassword, verifyPassword } from "../../auth/password.js";
 import { allowLoginAttempt, clearLoginAttempts } from "../../auth/login-rate-limit.js";
 import { getDb } from "../../db/client.js";
@@ -25,7 +26,9 @@ const DUMMY_HASH = `scrypt$${"0".repeat(32)}$${"0".repeat(128)}`;
 
 export const inquiryStatuses = ["new", "contacted", "quoted", "booked", "closed"] as const;
 export type InquiryStatus = (typeof inquiryStatuses)[number];
-export const postStatuses = ["draft", "published", "archived"] as const;
+export const postStatuses = ["draft", "scheduled", "published", "archived"] as const;
+/** Scheduling is bounded so a typo in the year cannot park an article for decades. */
+export const MAX_SCHEDULE_DAYS = 365;
 export type PostStatus = (typeof postStatuses)[number];
 
 export type AdminActor = { id: string; email: string };
@@ -39,6 +42,7 @@ export type UpdatePostResult =
   | { kind: "updated"; post: BlogPostRecord }
   | { kind: "not-found" }
   | { kind: "invalid-cover" }
+  | { kind: "invalid-schedule"; message: string }
   | { kind: "incomplete"; missing: string[] };
 export type CreatePostResult = { kind: "created"; post: BlogPostRecord } | { kind: "invalid-cover" };
 /** The media row a post's cover points at, as seen inside the post's transaction. */
@@ -52,6 +56,7 @@ export type AdminRouterDependencies = {
     inquiryCounts: { total: number; new: number };
     postCounts: { draft: number; published: number };
     emailOutboxCounts?: { pending: number; failed: number; deadLetter: number };
+    cacheRevalidationCounts?: { pending: number; deadLetter: number };
   }>;
   listInquiries: (query: PageQuery & { status: InquiryStatus | "all" }) => Promise<{
     items: InquiryRecord[];
@@ -96,7 +101,10 @@ const blogPostInputSchema = z
 
 const blogPostPatchSchema = blogPostInputSchema
   .partial()
-  .extend({ status: z.enum(postStatuses).optional() })
+  .extend({
+    status: z.enum(postStatuses).optional(),
+    publishAt: z.iso.datetime({ offset: true }).transform((value) => new Date(value)).optional(),
+  })
   .strict()
   .refine((value) => Object.keys(value).length > 0);
 
@@ -115,6 +123,7 @@ export function publishValidation(post: { authorName?: string | null; serviceSlu
 type PostPatchPlan =
   | { kind: "incomplete"; missing: string[] }
   | { kind: "invalid-cover" }
+  | { kind: "invalid-schedule"; message: string }
   | { kind: "apply"; update: Partial<typeof blogPosts.$inferInsert>; action: AuditAction; statusFrom: string; statusTo: string };
 
 /**
@@ -130,17 +139,28 @@ export function planPostPatch(existing: BlogPostRecord, patch: BlogPostPatch, no
   if (coverChanged && coverMediaId && !coverIsVerified) return { kind: "invalid-cover" };
   // The public URL always comes from the verified asset, never from the client.
   const coverImageUrl = coverIsVerified && cover ? cover.publicUrl : null;
-  if (statusTo === "published") {
+  const publishAt = statusTo === "scheduled" ? (patch.publishAt ?? existing.publishAt) : null;
+  if (statusTo === "scheduled") {
+    if (!publishAt) return { kind: "invalid-schedule", message: "Choose a date and time to publish this article." };
+    if (publishAt.getTime() <= now.getTime()) return { kind: "invalid-schedule", message: "Choose a publish time in the future." };
+    if (publishAt.getTime() > now.getTime() + MAX_SCHEDULE_DAYS * 86_400_000) {
+      return { kind: "invalid-schedule", message: "Articles can be scheduled up to a year ahead." };
+    }
+  }
+  // A scheduled post must already be complete: the scheduler publishes it without an editor present.
+  if (statusTo === "published" || statusTo === "scheduled") {
     const missing = publishValidation({ ...existing, ...patch, coverImageUrl });
     if (missing.length) return { kind: "incomplete", missing };
   }
-  const update: Partial<typeof blogPosts.$inferInsert> = { ...patch, updatedAt: now };
+  const update: Partial<typeof blogPosts.$inferInsert> = { ...patch, publishAt, updatedAt: now };
   if (coverChanged) update.coverImageUrl = coverImageUrl;
   if (statusTo === "published" && statusFrom !== "published") update.publishedAt = now;
-  if (statusTo === "draft") update.publishedAt = null;
+  if (statusTo === "draft" || statusTo === "scheduled") update.publishedAt = null;
   let action: AuditAction = "post.update";
-  if (statusTo !== statusFrom) {
-    if (statusTo === "published") action = "post.publish";
+  const rescheduled = statusTo === "scheduled" && publishAt?.getTime() !== existing.publishAt?.getTime();
+  if (statusTo !== statusFrom || rescheduled) {
+    if (statusTo === "scheduled") action = "post.schedule";
+    else if (statusTo === "published") action = "post.publish";
     else if (statusFrom === "published" && statusTo === "draft") action = "post.unpublish";
     else if (statusTo === "archived") action = "post.archive";
   }
@@ -276,6 +296,7 @@ function buildProductionDependencies(): AdminRouterDependencies {
           failed: Number(failedEmails[0]?.total ?? 0),
           deadLetter: Number(deadLetterEmails[0]?.total ?? 0),
         },
+        cacheRevalidationCounts: await countRevalidations(),
       };
     },
     async listInquiries(query) {
@@ -389,7 +410,7 @@ function buildProductionDependencies(): AdminRouterDependencies {
         const coverMediaId = patch.coverMediaId === undefined ? existing.coverMediaId : patch.coverMediaId;
         const cover = coverMediaId ? await lockCoverAsset(tx, coverMediaId) : null;
         const plan = planPostPatch(existing, patch, new Date(), cover);
-        if (plan.kind === "incomplete" || plan.kind === "invalid-cover") return plan;
+        if (plan.kind !== "apply") return plan;
         const [post] = await tx.update(blogPosts).set(plan.update).where(eq(blogPosts.id, id)).returning();
         if (!post) return { kind: "not-found" };
         await recordAudit(tx, audit, {
@@ -400,9 +421,15 @@ function buildProductionDependencies(): AdminRouterDependencies {
             slug: post.slug,
             fields: changedFields(patch),
             ...(plan.statusFrom !== plan.statusTo ? { statusFrom: plan.statusFrom, statusTo: plan.statusTo } : {}),
+            ...(post.publishAt ? { publishAt: post.publishAt.toISOString() } : {}),
           },
         });
+        const revalidation = revalidationForPostChange(existing, post);
+        if (revalidation) await queueRevalidation(tx, revalidation);
         return { kind: "updated", post };
+      }).then((result) => {
+        if (result.kind === "updated") notifyRevalidationQueued();
+        return result;
       });
     },
     async listPublishedPosts(query) {
@@ -615,6 +642,9 @@ export function createAdminRouter(
       return context.json({ success: false as const, message: "Blog post not found.", responseCode: 404 }, 404);
     }
     if (result.kind === "invalid-cover") return invalidCover(context);
+    if (result.kind === "invalid-schedule") {
+      return context.json({ success: false as const, message: result.message, responseCode: 400 }, 400);
+    }
     if (result.kind === "incomplete") {
       return context.json({ success: false as const, message: `Add ${result.missing.join(", ")} before publishing this article.`, responseCode: 400 }, 400);
     }
