@@ -19,6 +19,24 @@ const validPostPayload = {
   serviceSlug: "upholstery-cleaning",
 };
 
+type CreateInput = Parameters<AdminRouterDependencies["createPost"]>[0];
+
+function postFromInput(input: CreateInput) {
+  return {
+    id: postId,
+    ...input,
+    coverMediaId: input.coverMediaId ?? null,
+    coverImageUrl: null,
+    coverImageAlt: input.coverImageAlt ?? null,
+    seoTitle: input.seoTitle ?? null,
+    seoDescription: input.seoDescription ?? null,
+    status: "draft",
+    publishedAt: null,
+    createdAt: new Date("2026-09-14T12:00:00.000Z"),
+    updatedAt: new Date("2026-09-14T12:00:00.000Z"),
+  };
+}
+
 function admin(dependencies: Partial<AdminRouterDependencies> = {}) {
   const defaults: AdminRouterDependencies = {
     async login() { return { kind: "success", actor, token }; },
@@ -30,21 +48,7 @@ function admin(dependencies: Partial<AdminRouterDependencies> = {}) {
     async updateInquiry() { return null; },
     async listPosts() { return { items: [], total: 0 }; },
     async getPost() { return null; },
-    async createPost(input) {
-      return {
-        id: "01c47f57-ea8c-4583-aad4-9ec537f4ff41",
-        ...input,
-        coverMediaId: null,
-        coverImageUrl: input.coverImageUrl ?? null,
-        coverImageAlt: input.coverImageAlt ?? null,
-        seoTitle: input.seoTitle ?? null,
-        seoDescription: input.seoDescription ?? null,
-        status: "draft",
-        publishedAt: null,
-        createdAt: new Date("2026-09-14T12:00:00.000Z"),
-        updatedAt: new Date("2026-09-14T12:00:00.000Z"),
-      };
-    },
+    async createPost(input) { return { kind: "created", post: postFromInput(input) }; },
     async updatePost() { return { kind: "not-found" }; },
     async listPublishedPosts() { return { items: [], total: 0 }; },
     async getPublishedPost() { return null; },
@@ -120,21 +124,7 @@ describe("admin authentication", () => {
 
 describe("admin blog editor", () => {
   it("creates only a validated draft by default", async () => {
-    const createPost = vi.fn(async (input: Parameters<AdminRouterDependencies["createPost"]>[0]) => {
-      return {
-        id: "01c47f57-ea8c-4583-aad4-9ec537f4ff41",
-        ...input,
-        coverMediaId: null,
-        coverImageUrl: null,
-        coverImageAlt: null,
-        seoTitle: null,
-        seoDescription: null,
-        status: "draft",
-        publishedAt: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-    });
+    const createPost = vi.fn(async (input: CreateInput) => ({ kind: "created" as const, post: postFromInput(input) }));
     const response = await admin({ createPost }).request("/blog/posts", {
       method: "POST",
       headers: { ...authHeaders, "Content-Type": "application/json" },
@@ -169,11 +159,14 @@ describe("admin blog editor", () => {
   });
 });
 
+const coverId = "7d1a0c52-4b5e-4f4a-9a4f-2f6f8f0b1c11";
+const verifiedCover = { id: coverId, publicUrl: "https://media.example.test/cover.webp", status: "verified" };
+
 function storedPost(overrides: Partial<Parameters<typeof planPostPatch>[0]> = {}): Parameters<typeof planPostPatch>[0] {
   return {
     id: postId,
     ...validPostPayload,
-    coverMediaId: null,
+    coverMediaId: coverId,
     coverImageUrl: "https://media.example.test/cover.webp",
     coverImageAlt: "A freshly cleaned sofa",
     seoTitle: null,
@@ -196,18 +189,44 @@ function uniqueViolation(constraint: string) {
 describe("post patch planning", () => {
   const now = new Date("2026-10-26T12:00:00.000Z");
 
-  it("refuses to publish without editorial evidence", () => {
-    const plan = planPostPatch(storedPost({ coverImageUrl: null }), { status: "published" }, now);
+  it("refuses to publish without a cover", () => {
+    const plan = planPostPatch(storedPost({ coverMediaId: null, coverImageUrl: null }), { status: "published" }, now, null);
+    expect(plan).toEqual({ kind: "incomplete", missing: ["cover image"] });
+  });
+
+  it("does not accept a legacy cover URL without a verified upload", () => {
+    const plan = planPostPatch(storedPost({ coverMediaId: null }), { status: "published" }, now, null);
     expect(plan).toEqual({ kind: "incomplete", missing: ["cover image"] });
   });
 
   it("refuses to clear the cover alt text of a live article", () => {
-    const plan = planPostPatch(storedPost({ status: "published" }), { coverImageAlt: "" }, now);
+    const plan = planPostPatch(storedPost({ status: "published" }), { coverImageAlt: "" }, now, verifiedCover);
     expect(plan).toEqual({ kind: "incomplete", missing: ["cover image alt text"] });
   });
 
+  it("refuses to attach an upload that is not verified", () => {
+    const pendingId = "9b2f5d1e-0c3a-4e7b-8f6d-1a2b3c4d5e6f";
+    const plan = planPostPatch(
+      storedPost({ coverMediaId: null, coverImageUrl: null }),
+      { coverMediaId: pendingId },
+      now,
+      { id: pendingId, publicUrl: "https://media.example.test/pending.webp", status: "pending" },
+    );
+    expect(plan).toEqual({ kind: "invalid-cover" });
+  });
+
+  it("derives the cover URL from the verified upload", () => {
+    const plan = planPostPatch(storedPost({ coverMediaId: null, coverImageUrl: null }), { coverMediaId: coverId }, now, verifiedCover);
+    expect(plan).toMatchObject({ kind: "apply", update: { coverMediaId: coverId, coverImageUrl: verifiedCover.publicUrl } });
+  });
+
+  it("clears the cover URL when the cover is removed from a draft", () => {
+    const plan = planPostPatch(storedPost(), { coverMediaId: null }, now, null);
+    expect(plan).toMatchObject({ kind: "apply", update: { coverMediaId: null, coverImageUrl: null } });
+  });
+
   it("stamps the publish time and audits a first publish", () => {
-    const plan = planPostPatch(storedPost(), { status: "published" }, now);
+    const plan = planPostPatch(storedPost(), { status: "published" }, now, verifiedCover);
     expect(plan).toMatchObject({ kind: "apply", action: "post.publish", statusFrom: "draft", statusTo: "published" });
     expect(plan.kind === "apply" && plan.update.publishedAt).toEqual(now);
   });
@@ -217,13 +236,14 @@ describe("post patch planning", () => {
       storedPost({ status: "published", publishedAt: new Date("2026-10-01T09:00:00.000Z") }),
       { title: "A clearer title" },
       now,
+      verifiedCover,
     );
     expect(plan).toMatchObject({ kind: "apply", action: "post.update" });
     expect(plan.kind === "apply" && "publishedAt" in plan.update).toBe(false);
   });
 
   it("clears the publish time when an article is unpublished", () => {
-    const plan = planPostPatch(storedPost({ status: "published" }), { status: "draft" }, now);
+    const plan = planPostPatch(storedPost({ status: "published" }), { status: "draft" }, now, verifiedCover);
     expect(plan).toMatchObject({ kind: "apply", action: "post.unpublish" });
     expect(plan.kind === "apply" && plan.update.publishedAt).toBeNull();
   });
@@ -287,5 +307,28 @@ describe("admin audit context", () => {
     const revokeSession = vi.fn(async () => {});
     await admin({ revokeSession }).request("/auth/logout", { method: "POST", headers: authHeaders });
     expect(revokeSession).toHaveBeenCalledWith(token, expect.objectContaining({ actorId: actor.id }));
+  });
+});
+
+describe("admin blog cover contract", () => {
+  it("rejects a client-supplied cover URL", async () => {
+    const createPost = vi.fn(async (input: CreateInput) => ({ kind: "created" as const, post: postFromInput(input) }));
+    const response = await admin({ createPost }).request("/blog/posts", {
+      method: "POST",
+      headers: { ...authHeaders, "Content-Type": "application/json" },
+      body: JSON.stringify({ ...validPostPayload, coverImageUrl: "https://attacker.example/tracker.png" }),
+    });
+    expect(response.status).toBe(400);
+    expect(createPost).not.toHaveBeenCalled();
+  });
+
+  it("reports an unusable cover upload", async () => {
+    const response = await admin({ async createPost() { return { kind: "invalid-cover" }; } }).request("/blog/posts", {
+      method: "POST",
+      headers: { ...authHeaders, "Content-Type": "application/json" },
+      body: JSON.stringify({ ...validPostPayload, coverMediaId: coverId }),
+    });
+    expect(response.status).toBe(400);
+    expect((await response.json()).message).toContain("cover image");
   });
 });

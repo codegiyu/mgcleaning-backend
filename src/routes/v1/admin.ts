@@ -17,6 +17,7 @@ import { adminUsers } from "../../db/schema/adminUsers.js";
 import { blogPosts } from "../../db/schema/blogPosts.js";
 import { contactInquiries } from "../../db/schema/contactInquiries.js";
 import { emailOutbox } from "../../db/schema/emailOutbox.js";
+import { mediaAssets } from "../../db/schema/mediaAssets.js";
 
 const SESSION_COOKIE = "mg_admin_session";
 const SESSION_SECONDS = 60 * 60 * 12;
@@ -37,7 +38,11 @@ type LoginResult =
 export type UpdatePostResult =
   | { kind: "updated"; post: BlogPostRecord }
   | { kind: "not-found" }
+  | { kind: "invalid-cover" }
   | { kind: "incomplete"; missing: string[] };
+export type CreatePostResult = { kind: "created"; post: BlogPostRecord } | { kind: "invalid-cover" };
+/** The media row a post's cover points at, as seen inside the post's transaction. */
+export type CoverAsset = { id: string; publicUrl: string; status: string };
 
 export type AdminRouterDependencies = {
   login: (email: string, password: string, audit: AuditContext) => Promise<LoginResult>;
@@ -63,7 +68,7 @@ export type AdminRouterDependencies = {
     total: number;
   }>;
   getPost: (id: string) => Promise<BlogPostRecord | null>;
-  createPost: (input: BlogPostInput, audit: AuditContext) => Promise<BlogPostRecord>;
+  createPost: (input: BlogPostInput, audit: AuditContext) => Promise<CreatePostResult>;
   /** Validates and applies the patch against a locked row so a concurrent edit cannot publish an incomplete post. */
   updatePost: (id: string, patch: BlogPostPatch, audit: AuditContext) => Promise<UpdatePostResult>;
   listPublishedPosts: (query: PageQuery & { category?: string }) => Promise<{
@@ -82,10 +87,7 @@ const blogPostInputSchema = z
     category: z.string().trim().min(2).max(80),
     authorName: z.string().trim().min(2).max(120).default("M&G Cleaning Services"),
     serviceSlug: z.string().trim().min(2).max(120).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-    coverImageUrl: z.preprocess(
-      (value) => (value === "" ? undefined : value),
-      z.string().url().refine((value) => /^https?:\/\//i.test(value)).optional(),
-    ),
+    coverMediaId: z.string().uuid().nullable().optional(),
     coverImageAlt: z.string().trim().max(250).optional(),
     seoTitle: z.string().trim().max(180).optional(),
     seoDescription: z.string().trim().max(320).optional(),
@@ -112,20 +114,28 @@ export function publishValidation(post: { authorName?: string | null; serviceSlu
 
 type PostPatchPlan =
   | { kind: "incomplete"; missing: string[] }
+  | { kind: "invalid-cover" }
   | { kind: "apply"; update: Partial<typeof blogPosts.$inferInsert>; action: AuditAction; statusFrom: string; statusTo: string };
 
 /**
  * Pure decision for a post patch. The publish gate applies to the merged row
  * whenever the result is published, so clearing a cover on a live post is refused too.
  */
-export function planPostPatch(existing: BlogPostRecord, patch: BlogPostPatch, now: Date): PostPatchPlan {
+export function planPostPatch(existing: BlogPostRecord, patch: BlogPostPatch, now: Date, cover: CoverAsset | null): PostPatchPlan {
   const statusFrom = existing.status;
   const statusTo = patch.status ?? existing.status;
+  const coverMediaId = patch.coverMediaId === undefined ? existing.coverMediaId : patch.coverMediaId;
+  const coverChanged = coverMediaId !== existing.coverMediaId;
+  const coverIsVerified = Boolean(coverMediaId && cover?.id === coverMediaId && cover.status === "verified");
+  if (coverChanged && coverMediaId && !coverIsVerified) return { kind: "invalid-cover" };
+  // The public URL always comes from the verified asset, never from the client.
+  const coverImageUrl = coverIsVerified && cover ? cover.publicUrl : null;
   if (statusTo === "published") {
-    const missing = publishValidation({ ...existing, ...patch });
+    const missing = publishValidation({ ...existing, ...patch, coverImageUrl });
     if (missing.length) return { kind: "incomplete", missing };
   }
   const update: Partial<typeof blogPosts.$inferInsert> = { ...patch, updatedAt: now };
+  if (coverChanged) update.coverImageUrl = coverImageUrl;
   if (statusTo === "published" && statusFrom !== "published") update.publishedAt = now;
   if (statusTo === "draft") update.publishedAt = null;
   let action: AuditAction = "post.update";
@@ -228,6 +238,18 @@ async function revokeDatabaseSession(token: string, audit: AuditContext) {
       entityId: revoked[0]?.userId ?? null,
     });
   });
+}
+
+type Transaction = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
+
+/** FOR SHARE blocks a concurrent media delete until this post's transaction commits. */
+async function lockCoverAsset(tx: Transaction, id: string): Promise<CoverAsset | null> {
+  const [asset] = await tx
+    .select({ id: mediaAssets.id, publicUrl: mediaAssets.publicUrl, status: mediaAssets.status })
+    .from(mediaAssets)
+    .where(eq(mediaAssets.id, id))
+    .for("share");
+  return asset ?? null;
 }
 
 function buildProductionDependencies(): AdminRouterDependencies {
@@ -343,27 +365,31 @@ function buildProductionDependencies(): AdminRouterDependencies {
       return item ?? null;
     },
     async createPost(input, audit) {
-      return getDb().transaction(async (tx) => {
+      return getDb().transaction(async (tx): Promise<CreatePostResult> => {
+        const cover = input.coverMediaId ? await lockCoverAsset(tx, input.coverMediaId) : null;
+        if (input.coverMediaId && cover?.status !== "verified") return { kind: "invalid-cover" };
         const [post] = await tx
           .insert(blogPosts)
-          .values({ ...input, serviceSlug: input.serviceSlug, authorName: input.authorName, coverImageUrl: input.coverImageUrl ?? null, coverImageAlt: input.coverImageAlt ?? null, seoTitle: input.seoTitle ?? null, seoDescription: input.seoDescription ?? null })
+          .values({ ...input, serviceSlug: input.serviceSlug, authorName: input.authorName, coverMediaId: cover?.id ?? null, coverImageUrl: cover?.publicUrl ?? null, coverImageAlt: input.coverImageAlt ?? null, seoTitle: input.seoTitle ?? null, seoDescription: input.seoDescription ?? null })
           .returning();
         if (!post) throw new Error("Blog post insert returned no row.");
         await recordAudit(tx, audit, {
           action: "post.create",
           entityType: "blog_post",
           entityId: post.id,
-          metadata: { slug: post.slug },
+          metadata: { slug: post.slug, ...(post.coverMediaId ? { coverMediaId: post.coverMediaId } : {}) },
         });
-        return post;
+        return { kind: "created", post };
       });
     },
     async updatePost(id, patch, audit) {
       return getDb().transaction(async (tx): Promise<UpdatePostResult> => {
         const [existing] = await tx.select().from(blogPosts).where(eq(blogPosts.id, id)).for("update");
         if (!existing) return { kind: "not-found" };
-        const plan = planPostPatch(existing, patch, new Date());
-        if (plan.kind === "incomplete") return plan;
+        const coverMediaId = patch.coverMediaId === undefined ? existing.coverMediaId : patch.coverMediaId;
+        const cover = coverMediaId ? await lockCoverAsset(tx, coverMediaId) : null;
+        const plan = planPostPatch(existing, patch, new Date(), cover);
+        if (plan.kind === "incomplete" || plan.kind === "invalid-cover") return plan;
         const [post] = await tx.update(blogPosts).set(plan.update).where(eq(blogPosts.id, id)).returning();
         if (!post) return { kind: "not-found" };
         await recordAudit(tx, audit, {
@@ -405,6 +431,10 @@ function buildProductionDependencies(): AdminRouterDependencies {
       return post ?? null;
     },
   };
+}
+
+function invalidCover(context: Context) {
+  return context.json({ success: false as const, message: "Choose an uploaded cover image that has finished processing.", responseCode: 400 }, 400);
 }
 
 function slugConflict(context: Context) {
@@ -555,8 +585,9 @@ export function createAdminRouter(
       return context.json({ success: false as const, message: "Please check the article fields and try again.", responseCode: 400 }, 400);
     }
     try {
-      const post = await dependencies.createPost(parsed.data, auditContextFrom(context, context.get("admin").id));
-      return context.json({ success: true as const, message: "Draft created.", responseCode: 201, data: post }, 201);
+      const result = await dependencies.createPost(parsed.data, auditContextFrom(context, context.get("admin").id));
+      if (result.kind === "invalid-cover") return invalidCover(context);
+      return context.json({ success: true as const, message: "Draft created.", responseCode: 201, data: result.post }, 201);
     } catch (error) {
       if (isUniqueViolation(error, BLOG_POST_SLUG_CONSTRAINT)) return slugConflict(context);
       throw error;
@@ -583,6 +614,7 @@ export function createAdminRouter(
     if (result.kind === "not-found") {
       return context.json({ success: false as const, message: "Blog post not found.", responseCode: 404 }, 404);
     }
+    if (result.kind === "invalid-cover") return invalidCover(context);
     if (result.kind === "incomplete") {
       return context.json({ success: false as const, message: `Add ${result.missing.join(", ")} before publishing this article.`, responseCode: 400 }, 400);
     }
