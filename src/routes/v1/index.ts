@@ -7,6 +7,7 @@ import type { Context } from "hono";
 import { env } from "../../env.js";
 import { logger } from "../../logger.js";
 import { getRequestLogger } from "../../request-context.js";
+import { effectiveNotificationEmail, readSiteSettings } from "../../settings/site-settings.js";
 import { getDb } from "../../db/client.js";
 import { contactInquiries } from "../../db/schema/contactInquiries.js";
 import { emailOutbox, type NewEmailOutbox } from "../../db/schema/emailOutbox.js";
@@ -273,7 +274,8 @@ const productionDependencies: InquiryRouterDependencies = {
         return saved;
       }
 
-      const rows = createEmailOutboxRows(input, inquiry, env.INQUIRY_NOTIFICATION_TO);
+      // Read inside the transaction so the alert goes to the inbox configured when the inquiry was saved.
+      const rows = createEmailOutboxRows(input, inquiry, effectiveNotificationEmail(await readSiteSettings(tx)));
       const outbox = await tx
         .insert(emailOutbox)
         .values(rows)
