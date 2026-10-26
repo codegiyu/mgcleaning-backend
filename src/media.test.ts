@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { MediaAsset } from "./db/schema/mediaAssets.js";
+import { runMediaMaintenance } from "./media/maintenance.js";
 import { buildMediaKey, matchesImageSignature, resolveImageUpload } from "./media/policy.js";
 import { createAdminRouter, type AdminRouterDependencies } from "./routes/v1/admin.js";
 import { createMediaRouter, sanitizeFilename, type MediaRouterDependencies, type PendingAssetInput } from "./routes/v1/media.js";
@@ -277,5 +278,23 @@ describe("R2 presigning", () => {
     expect(url.searchParams.get("X-Amz-Expires")).toBe("600");
     expect([...url.searchParams.keys()].some((key) => key.toLowerCase().includes("checksum"))).toBe(false);
     expect(result.headers).toEqual({ "Content-Type": "image/webp", "Cache-Control": "public, max-age=31536000, immutable" });
+  });
+});
+
+describe("media maintenance", () => {
+  it("expires stale uploads and keeps going when one removal fails", async () => {
+    const storage = fakeStorage();
+    storage.delete.mockRejectedValueOnce(new Error("R2 unavailable"));
+    const markObjectRemoved = vi.fn(async () => undefined);
+    const result = await runMediaMaintenance({
+      storage: () => storage,
+      async expireStalePending() { return 2; },
+      async listObjectsToRemove() { return [{ id: "a", key: "k/a.webp" }, { id: "b", key: "k/b.webp" }]; },
+      markObjectRemoved,
+    });
+
+    expect(result).toEqual({ expired: 2, removed: 1, attempted: 2 });
+    expect(markObjectRemoved).toHaveBeenCalledTimes(1);
+    expect(markObjectRemoved).toHaveBeenCalledWith("b");
   });
 });

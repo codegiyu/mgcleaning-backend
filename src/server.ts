@@ -4,12 +4,14 @@ import { serve } from "@hono/node-server";
 import { app } from "./app.js";
 import { closeDb } from "./db/client.js";
 import { env } from "./env.js";
+import { startMediaMaintenance } from "./media/maintenance.js";
 import { logger } from "./logger.js";
 import { closeEmailQueue } from "./queue/email.queue.js";
 import { startEmailWorker } from "./queue/email.worker.js";
 import { closeInquiryAbuseRedis } from "./security/inquiry-abuse.js";
 
 const emailWorker = startEmailWorker();
+const mediaMaintenance = startMediaMaintenance();
 
 const server = serve({
   fetch: app.fetch,
@@ -25,6 +27,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     if (isShuttingDown) return;
     isShuttingDown = true;
+    mediaMaintenance.close();
 
     server.close((error) => {
       if (error) {
