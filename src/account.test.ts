@@ -2,13 +2,22 @@ import { describe, expect, it, vi } from "vitest";
 import { passwordPolicyError } from "./auth/password-policy.js";
 import { createAccountRouter, type AccountRouterDependencies } from "./routes/v1/account.js";
 import { createAdminRouter, type AdminRouterDependencies } from "./routes/v1/admin.js";
+import { createOperationsRouter, type OperationsRouterDependencies, type SettingsView } from "./routes/v1/operations.js";
+import { effectiveNotificationEmail } from "./settings/site-settings.js";
 
 const token = "a-session-token-used-only-in-this-test";
 const actor = { id: "b48d4f5b-37e4-4f3b-bd0e-2ce9712dd4a5", email: "admin@example.test", sessionId: "c0ffee00-1d2e-4f3a-8b9c-0d1e2f3a4b5c" };
 const otherSessionId = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
 const headers = { Cookie: `mg_admin_session=${token}`, Origin: "http://localhost:3000", "Content-Type": "application/json" };
 
-function app(account: Partial<AccountRouterDependencies> = {}, _operations: Record<string, never> = {}, admin: Partial<AdminRouterDependencies> = {}) {
+const settings: SettingsView = {
+  inquiryNotificationEmail: null,
+  effectiveNotificationEmail: "inquiries@example.com",
+  defaultAuthorName: null,
+  updatedAt: null,
+};
+
+function app(account: Partial<AccountRouterDependencies> = {}, operations: Partial<OperationsRouterDependencies> = {}, admin: Partial<AdminRouterDependencies> = {}) {
   const accountDependencies: AccountRouterDependencies = {
     async changePassword() { return { kind: "changed", revokedSessions: 2 }; },
     async listSessions() { return []; },
@@ -16,11 +25,17 @@ function app(account: Partial<AccountRouterDependencies> = {}, _operations: Reco
     async revokeOtherSessions() { return 1; },
     ...account,
   };
+  const operationsDependencies: OperationsRouterDependencies = {
+    async listAudit() { return { items: [], total: 0 }; },
+    async getSettings() { return settings; },
+    async updateSettings(patch) { return { ...settings, ...patch }; },
+    ...operations,
+  };
   const adminDependencies = {
     async resolveSession(value: string) { return value === token ? actor : null; },
     ...admin,
   } as unknown as AdminRouterDependencies; // Only the routes under test are exercised.
-  return createAdminRouter(adminDependencies, undefined, createAccountRouter(accountDependencies));
+  return createAdminRouter(adminDependencies, undefined, createAccountRouter(accountDependencies), createOperationsRouter(operationsDependencies));
 }
 
 const validChange = { currentPassword: "the-current-password", newPassword: "a-brand-new-long-password" };
@@ -112,6 +127,52 @@ describe("session management", () => {
       body: JSON.stringify({ email: "admin@example.test", password: "whatever" }),
     });
     expect(login.mock.calls[0]?.[3]).toEqual({ userAgent: "x".repeat(200) });
+  });
+});
+
+describe("activity log", () => {
+  it("passes validated filters through", async () => {
+    const listAudit = vi.fn<OperationsRouterDependencies["listAudit"]>(async () => ({ items: [], total: 0 }));
+    const response = await app({}, { listAudit }).request("/audit?entityType=inquiry&entityId=5a3c2a3e-8a0b-4d8e-9a43-1c7c5b5f9a10&pageSize=10", { headers });
+    expect(response.status).toBe(200);
+    expect(listAudit).toHaveBeenCalledWith(expect.objectContaining({ entityType: "inquiry", entityId: "5a3c2a3e-8a0b-4d8e-9a43-1c7c5b5f9a10", page: 1, pageSize: 10 }));
+  });
+
+  it("rejects unknown entity types and malformed IDs", async () => {
+    const listAudit = vi.fn<OperationsRouterDependencies["listAudit"]>();
+    expect((await app({}, { listAudit }).request("/audit?entityType=passwords", { headers })).status).toBe(400);
+    expect((await app({}, { listAudit }).request("/audit?entityId=1%27%20or%201%3D1", { headers })).status).toBe(400);
+    expect(listAudit).not.toHaveBeenCalled();
+  });
+
+  it("is admin-only", async () => {
+    expect((await app().request("/audit")).status).toBe(401);
+  });
+});
+
+describe("site settings", () => {
+  it("normalises the notification email and audits the change", async () => {
+    const updateSettings = vi.fn<OperationsRouterDependencies["updateSettings"]>(async (patch) => ({ ...settings, ...patch }));
+    const response = await app({}, { updateSettings }).request("/settings", { method: "PATCH", headers, body: JSON.stringify({ inquiryNotificationEmail: " Team@Example.COM " }) });
+    expect(response.status).toBe(200);
+    expect(updateSettings).toHaveBeenCalledWith({ inquiryNotificationEmail: "team@example.com" }, expect.objectContaining({ actorId: actor.id }));
+  });
+
+  it("only accepts operational settings", async () => {
+    const updateSettings = vi.fn<OperationsRouterDependencies["updateSettings"]>();
+    const router = app({}, { updateSettings });
+    for (const body of [{}, { responseTimeWording: "Within 5 minutes" }, { inquiryNotificationEmail: "not-an-email" }]) {
+      expect((await router.request("/settings", { method: "PATCH", headers, body: JSON.stringify(body) })).status).toBe(400);
+    }
+    expect(updateSettings).not.toHaveBeenCalled();
+  });
+
+  it("allows clearing the inbox back to the deployment default", async () => {
+    const updateSettings = vi.fn<OperationsRouterDependencies["updateSettings"]>(async (patch) => ({ ...settings, ...patch }));
+    await app({}, { updateSettings }).request("/settings", { method: "PATCH", headers, body: JSON.stringify({ inquiryNotificationEmail: null }) });
+    expect(updateSettings.mock.calls[0]?.[0]).toEqual({ inquiryNotificationEmail: null });
+    expect(effectiveNotificationEmail({ inquiryNotificationEmail: null })).toBe("inquiries@example.com");
+    expect(effectiveNotificationEmail({ inquiryNotificationEmail: "team@example.com" })).toBe("team@example.com");
   });
 });
 

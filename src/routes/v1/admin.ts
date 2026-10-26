@@ -10,6 +10,7 @@ import { getRequestLogger } from "../../request-context.js";
 import { pageResult, parsePageQuery, trustedOrigin, uuidSchema, type PageQuery } from "./admin-shared.js";
 import { createMediaRouter } from "./media.js";
 import { createAccountRouter, type SessionActor } from "./account.js";
+import { createOperationsRouter } from "./operations.js";
 import { countRevalidations, notifyRevalidationQueued, queueRevalidation, revalidationForPostChange } from "../../cache/revalidation.js";
 import { hashPassword, verifyPassword } from "../../auth/password.js";
 import { allowLoginAttempt, clearLoginAttempts } from "../../auth/login-rate-limit.js";
@@ -486,6 +487,7 @@ export function createAdminRouter(
   dependencies = buildProductionDependencies(),
   mediaRouter = createMediaRouter(),
   accountRouter = createAccountRouter(),
+  operationsRouter = createOperationsRouter(),
 ) {
   const router = new Hono<{ Variables: { admin: SessionActor } }>();
 
@@ -670,6 +672,7 @@ export function createAdminRouter(
 
   router.route("/media", mediaRouter);
   router.route("/account", accountRouter);
+  router.route("/", operationsRouter);
 
   return router;
 }
