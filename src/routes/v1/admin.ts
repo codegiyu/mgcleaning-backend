@@ -4,6 +4,7 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { env } from "../../env.js";
+import { BLOG_POST_SLUG_CONSTRAINT, isUniqueViolation } from "../../db/errors.js";
 import { hashPassword, verifyPassword } from "../../auth/password.js";
 import { allowLoginAttempt, clearLoginAttempts } from "../../auth/login-rate-limit.js";
 import { getDb } from "../../db/client.js";
@@ -320,6 +321,10 @@ function buildProductionDependencies(): AdminRouterDependencies {
   };
 }
 
+function slugConflict(context: Context) {
+  return context.json({ success: false as const, message: "That article URL is already in use.", responseCode: 409 }, 409);
+}
+
 function trustedOrigin(context: Context) {
   const origin = context.req.header("origin");
   return origin === env.FRONTEND_ORIGIN;
@@ -466,8 +471,9 @@ export function createAdminRouter(dependencies = buildProductionDependencies()) 
     try {
       const post = await dependencies.createPost(parsed.data);
       return context.json({ success: true as const, message: "Draft created.", responseCode: 201, data: post }, 201);
-    } catch {
-      return context.json({ success: false as const, message: "That article URL is already in use.", responseCode: 409 }, 409);
+    } catch (error) {
+      if (isUniqueViolation(error, BLOG_POST_SLUG_CONSTRAINT)) return slugConflict(context);
+      throw error;
     }
   });
 
@@ -491,8 +497,9 @@ export function createAdminRouter(dependencies = buildProductionDependencies()) 
       const post = await dependencies.updatePost(id, parsed.data);
       if (!post) return context.json({ success: false as const, message: "Blog post not found.", responseCode: 404 }, 404);
       return context.json({ success: true as const, message: "Blog post updated.", responseCode: 200, data: post });
-    } catch {
-      return context.json({ success: false as const, message: "That article URL is already in use.", responseCode: 409 }, 409);
+    } catch (error) {
+      if (isUniqueViolation(error, BLOG_POST_SLUG_CONSTRAINT)) return slugConflict(context);
+      throw error;
     }
   });
 

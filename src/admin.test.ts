@@ -7,6 +7,7 @@ import {
 
 const actor = { id: "b48d4f5b-37e4-4f3b-bd0e-2ce9712dd4a5", email: "admin@example.test" };
 const token = "a-session-token-used-only-in-this-test";
+const postId = "01c47f57-ea8c-4583-aad4-9ec537f4ff41";
 const validPostPayload = {
   title: "A sample upholstery care article",
   slug: "sample-upholstery-care-article",
@@ -178,5 +179,51 @@ describe("admin blog editor", () => {
     expect(response.status).toBe(400);
     expect((await response.json()).message).toContain("cover image");
     expect(updatePost).not.toHaveBeenCalled();
+  });
+});
+
+/** Mirrors how Drizzle wraps a postgres-js unique violation. */
+function uniqueViolation(constraint: string) {
+  return Object.assign(new Error("Failed query"), {
+    cause: Object.assign(new Error("duplicate key value"), { code: "23505", constraint_name: constraint }),
+  });
+}
+
+describe("admin blog error mapping", () => {
+  it("returns 409 for a slug unique violation", async () => {
+    const response = await admin({
+      async createPost() { throw uniqueViolation("blog_posts_slug_unique"); },
+    }).request("/blog/posts", {
+      method: "POST",
+      headers: { ...authHeaders, "Content-Type": "application/json" },
+      body: JSON.stringify(validPostPayload),
+    });
+    expect(response.status).toBe(409);
+  });
+
+  it("does not disguise other failures as slug conflicts", async () => {
+    const router = admin({
+      async updatePost() { throw new Error("connection terminated"); },
+    });
+    router.onError((_error, context) => context.json({ success: false, message: "server error", responseCode: 500 }, 500));
+    const response = await router.request(`/blog/posts/${postId}`, {
+      method: "PATCH",
+      headers: { ...authHeaders, "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "A sample upholstery care article" }),
+    });
+    expect(response.status).toBe(500);
+  });
+
+  it("does not treat other unique constraints as slug conflicts", async () => {
+    const router = admin({
+      async createPost() { throw uniqueViolation("some_other_unique"); },
+    });
+    router.onError((_error, context) => context.json({ success: false, message: "server error", responseCode: 500 }, 500));
+    const response = await router.request("/blog/posts", {
+      method: "POST",
+      headers: { ...authHeaders, "Content-Type": "application/json" },
+      body: JSON.stringify(validPostPayload),
+    });
+    expect(response.status).toBe(500);
   });
 });

@@ -1,6 +1,7 @@
 import { Writable } from "node:stream";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
+import { isUniqueViolation } from "./db/errors.js";
 import { createLogger } from "./logger.js";
 import { requestContext, type RequestContextVariables } from "./request-context.js";
 import { clientIpFromForwardedFor } from "./security/inquiry-abuse.js";
@@ -66,5 +67,15 @@ describe("client IP resolution", () => {
     expect(clientIpFromForwardedFor("6.6.6.6", 0)).toBeNull();
     expect(clientIpFromForwardedFor("198.51.100.7", 2)).toBeNull();
     expect(clientIpFromForwardedFor(undefined, 1)).toBeNull();
+  });
+});
+
+describe("database errors", () => {
+  it("recognises only SQLSTATE 23505 on the named constraint", () => {
+    const wrapped = { cause: { code: "23505", constraint_name: "blog_posts_slug_unique" } };
+    expect(isUniqueViolation(wrapped, "blog_posts_slug_unique")).toBe(true);
+    expect(isUniqueViolation(wrapped, "other_unique")).toBe(false);
+    expect(isUniqueViolation({ cause: { code: "40001" } })).toBe(false);
+    expect(isUniqueViolation(new Error("boom"))).toBe(false);
   });
 });
