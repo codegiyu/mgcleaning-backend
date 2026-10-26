@@ -7,6 +7,8 @@ import { auditContextFrom, changedFields, recordAudit, type AuditAction, type Au
 import { env } from "../../env.js";
 import { BLOG_POST_SLUG_CONSTRAINT, isUniqueViolation } from "../../db/errors.js";
 import { getRequestLogger } from "../../request-context.js";
+import { pageResult, parsePageQuery, trustedOrigin, uuidSchema, type PageQuery } from "./admin-shared.js";
+import { createMediaRouter } from "./media.js";
 import { hashPassword, verifyPassword } from "../../auth/password.js";
 import { allowLoginAttempt, clearLoginAttempts } from "../../auth/login-rate-limit.js";
 import { getDb } from "../../db/client.js";
@@ -32,7 +34,6 @@ type LoginResult =
   | { kind: "success"; actor: AdminActor; token: string }
   | { kind: "invalid" }
   | { kind: "rate-limited" };
-type PageQuery = { page: number; pageSize: number; query?: string };
 export type UpdatePostResult =
   | { kind: "updated"; post: BlogPostRecord }
   | { kind: "not-found" }
@@ -147,12 +148,6 @@ const inquiryPatchSchema = z
   })
   .strict()
   .refine((value) => Object.keys(value).length > 0);
-const uuidSchema = z.string().uuid();
-const pageSchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(50).default(20),
-  query: z.string().trim().max(120).optional(),
-});
 
 function digestToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
@@ -160,18 +155,6 @@ function digestToken(token: string) {
 
 function escapeLike(value: string) {
   return value.replace(/[\\%_]/g, "\\$&");
-}
-
-function pageResult<T>(items: T[], total: number, query: PageQuery) {
-  return { items, total, page: query.page, pageSize: query.pageSize };
-}
-
-function parsePageQuery(context: Context) {
-  return pageSchema.safeParse({
-    page: context.req.query("page"),
-    pageSize: context.req.query("pageSize"),
-    query: context.req.query("query"),
-  });
 }
 
 async function createDatabaseSession(email: string, password: string, audit: AuditContext): Promise<LoginResult> {
@@ -428,12 +411,11 @@ function slugConflict(context: Context) {
   return context.json({ success: false as const, message: "That article URL is already in use.", responseCode: 409 }, 409);
 }
 
-function trustedOrigin(context: Context) {
-  const origin = context.req.header("origin");
-  return origin === env.FRONTEND_ORIGIN;
-}
 
-export function createAdminRouter(dependencies = buildProductionDependencies()) {
+export function createAdminRouter(
+  dependencies = buildProductionDependencies(),
+  mediaRouter = createMediaRouter(),
+) {
   const router = new Hono<{ Variables: { admin: AdminActor } }>();
 
   router.use("*", async (context, next) => {
@@ -606,6 +588,8 @@ export function createAdminRouter(dependencies = buildProductionDependencies()) 
     }
     return context.json({ success: true as const, message: "Blog post updated.", responseCode: 200, data: result.post });
   });
+
+  router.route("/media", mediaRouter);
 
   return router;
 }

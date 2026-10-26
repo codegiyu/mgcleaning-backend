@@ -15,6 +15,9 @@ export const auditActions = [
   "post.publish",
   "post.unpublish",
   "post.archive",
+  "media.upload",
+  "media.update",
+  "media.delete",
 ] as const;
 export type AuditAction = (typeof auditActions)[number];
 
@@ -27,7 +30,7 @@ export type AuditContext = {
 
 export type AuditEntry = {
   action: AuditAction;
-  entityType: "admin_user" | "inquiry" | "blog_post";
+  entityType: "admin_user" | "inquiry" | "blog_post" | "media_asset";
   entityId?: string | null;
   metadata?: Record<string, unknown>;
 };
