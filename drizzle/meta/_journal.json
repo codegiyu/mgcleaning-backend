@@ -43,6 +43,13 @@
       "when": 1790842229149,
       "tag": "0005_remarkable_sentinel",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793052908157,
+      "tag": "0006_admin_audit_events",
+      "breakpoints": true
     }
   ]
 }
