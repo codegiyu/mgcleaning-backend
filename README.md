@@ -51,7 +51,26 @@ The public Next.js app is deployed separately from the `mgcleaning` repository a
 
 The admin API includes session login/logout, an inquiry inbox with private status/notes, and blog draft/publish operations. Create the first admin after migrations: set `BOOTSTRAP_ADMIN_EMAIL` and a unique `BOOTSTRAP_ADMIN_PASSWORD` of at least 12 characters in `.env`, then run `npm run admin:bootstrap`. The command stores a scrypt password hash; remove the bootstrap password from `.env` after it succeeds. It will not reset an existing account. Sessions are random opaque values stored as hashes, expire after 12 hours, and are returned only in an HttpOnly cookie. Admin writes require the configured `FRONTEND_ORIGIN`.
 
-Published articles are exposed at `GET /api/v1/blog` and `GET /api/v1/blog/:slug`. Public reads only return published posts. Admin post content is plain text with limited headings, bold, and bullet-list conventions; raw HTML is not interpreted. Each article records an author name and optional related service slug. Publishing requires an author, related service, HTTPS cover image, and cover-image alt text. Cover images currently use HTTPS URLs because object storage has not yet been selected.
+Published articles are exposed at `GET /api/v1/blog` and `GET /api/v1/blog/:slug`. Public reads only return published posts. Admin post content is plain text with limited headings, bold, and bullet-list conventions; raw HTML is not interpreted. Each article records an author name and optional related service slug. Publishing requires an author, related service, a verified cover upload, and cover-image alt text. Posts reference their cover by `coverMediaId`; the public cover URL is copied from the verified media asset on the server, and client-supplied cover URLs are rejected.
+
+## Media uploads (Cloudflare R2)
+
+Blog covers are uploaded straight from the admin browser to R2 with short-lived presigned URLs, following the pattern used in the oj backend:
+
+1. `POST /api/v1/admin/media/uploads` with `{ intent: "blog-cover", fileExtension, byteSize, filename?, altText? }`. The API accepts JPG, PNG, and WebP only (no SVG), derives the content type from the extension, generates the key `{R2_FOLDER_PREFIX}/blog-cover/{yyyy}/{mm}/{random}.{ext}`, stores a `pending` row in `media_assets`, and returns a 10-minute `PUT` URL plus the exact headers the browser must send. The URL signs `Content-Length`, `Content-Type`, and `Cache-Control`, so R2 rejects a body of a different size or type.
+2. The browser `PUT`s the file to that URL with those headers.
+3. `POST /api/v1/admin/media/:id/verify` checks the stored object exists, matches the declared size and type, and starts with a real JPG/PNG/WebP signature. Only then does the row become `verified` (audited as `media.upload`). Rejected objects are deleted.
+
+`GET /api/v1/admin/media` lists verified images for reuse, `PATCH /api/v1/admin/media/:id` updates default alt text, and `DELETE /api/v1/admin/media/:id` refuses images that are still an article cover. The API process runs a cleanup pass every 10 minutes that expires abandoned uploads and removes objects for expired, failed, and deleted rows. Verified images are never removed automatically.
+
+One-time Cloudflare setup:
+
+- Create one bucket for all environments; `R2_FOLDER_PREFIX` keeps them apart (`development-files`, `staging-files`, `production-files`).
+- Create an R2 API token scoped to that bucket with Object Read & Write, and set `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `R2_BUCKET_NAME`.
+- Connect a custom domain (for example `media.<your-domain>`) to the bucket and set `R2_PUBLIC_URL` to it. Do not use the rate-limited `r2.dev` URL in production.
+- Add a bucket CORS rule allowing `PUT` and `HEAD` from the exact admin origins (local, staging, production) with allowed headers `Content-Type` and `Cache-Control`.
+
+Without the R2 variables, local development still runs; upload endpoints return 503. Production refuses to start without them.
 
 Logs are structured JSON (pino) with contact details and credentials redacted. Every response carries an `X-Request-Id` header (a well-formed incoming ID is reused), and each request log line includes it. Admin sign-ins, sign-outs, inquiry changes, and blog post changes are written to the append-only `admin_audit_events` table in the same transaction as the change; audit metadata records field names and status transitions, never contact details or note text, and IPs are stored only as keyed hashes.
 
