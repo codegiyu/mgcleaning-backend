@@ -47,5 +47,31 @@ export const env = z
     TURNSTILE_MODE: z.enum(["off", "on"]).default("off"),
     TURNSTILE_SECRET_KEY: optionalString,
     TURNSTILE_TIMEOUT_MS: z.coerce.number().int().positive().max(10_000).default(3_000),
+    R2_ACCOUNT_ID: optionalString,
+    R2_ACCESS_KEY_ID: optionalString,
+    R2_SECRET_ACCESS_KEY: optionalString,
+    R2_BUCKET_NAME: optionalString,
+    R2_FOLDER_PREFIX: z
+      .string()
+      .trim()
+      .regex(/^[a-z0-9][a-z0-9-]{0,62}$/, "Use a lowercase folder name such as staging-files.")
+      .default("development-files"),
+    R2_PUBLIC_URL: z.preprocess(
+      (value) => (value === "" ? undefined : value),
+      z
+        .string()
+        .url()
+        .refine((value) => value.startsWith("https://") || value.startsWith("http://localhost"), "Use an HTTPS media URL.")
+        .transform((value) => value.replace(/\/+$/, ""))
+        .optional(),
+    ),
+    MEDIA_MAX_UPLOAD_BYTES: z.coerce.number().int().positive().max(20 * 1024 * 1024).default(5 * 1024 * 1024),
+  })
+  .superRefine((value, context) => {
+    if (value.NODE_ENV !== "production") return;
+    // Uploads are a core admin workflow in production; refuse to start without storage.
+    for (const key of ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET_NAME", "R2_PUBLIC_URL"] as const) {
+      if (!value[key]) context.addIssue({ code: "custom", path: [key], message: `${key} is required in production.` });
+    }
   })
   .parse(process.env);
