@@ -16,7 +16,9 @@
     "admin:bootstrap": "tsx src/scripts/bootstrapAdmin.ts",
     "admin:bootstrap:runtime": "node dist/scripts/bootstrapAdmin.js",
     "admin:reset-password": "tsx src/scripts/resetAdminPassword.ts",
-    "admin:reset-password:runtime": "node dist/scripts/resetAdminPassword.js"
+    "admin:reset-password:runtime": "node dist/scripts/resetAdminPassword.js",
+    "smoke": "tsx src/scripts/smoke.ts",
+    "smoke:runtime": "node dist/scripts/smoke.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1157.0",
