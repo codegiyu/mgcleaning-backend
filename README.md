@@ -54,6 +54,10 @@ The admin API includes session login/logout, an inquiry inbox with private statu
 
 Published articles are exposed at `GET /api/v1/blog` and `GET /api/v1/blog/:slug`. Public reads only return published posts. Admin post content is plain text with limited headings, bold, and bullet-list conventions; raw HTML is not interpreted. Each article records an author name and optional related service slug. Publishing requires an author, related service, a verified cover upload, and cover-image alt text. Posts reference their cover by `coverMediaId`; the public cover URL is copied from the verified media asset on the server, and client-supplied cover URLs are rejected.
 
+## Inquiry attribution
+
+`POST /api/v1/inquiries` accepts optional first-touch attribution from the website: `utmSource`, `utmMedium`, `utmCampaign`, `utmContent`, and `landingPath`. These values come from the visitor's URL, so they are normalised to lowercase tokens (`[a-z0-9._~+-]`, at most 120 characters) and same-site paths, and malformed values are dropped instead of rejecting the enquiry. They are stored on `contact_inquiries`, included as a "Came from" line in the internal alert email, and returned to admins. `GET /api/v1/admin/inquiries?source=instagram` filters by source, and `source=direct` lists enquiries with no campaign source.
+
 ## Admin account, activity, and settings
 
 - **Password change:** `POST /api/v1/admin/account/password` with `{ currentPassword, newPassword }`. The new password must be 12–200 characters and different from the current one; attempts are rate-limited (5 per 15 minutes per account). On success every other session for the account is signed out, and the change is audited.
