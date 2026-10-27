@@ -22,11 +22,16 @@ export const auditActions = [
   "media.upload",
   "media.update",
   "media.delete",
+  "review.create",
+  "review.update",
+  "review.publish",
+  "review.unpublish",
+  "review.delete",
   "settings.update",
 ] as const;
 export type AuditAction = (typeof auditActions)[number];
 
-export const auditEntityTypes = ["admin_user", "inquiry", "blog_post", "media_asset", "site_settings"] as const;
+export const auditEntityTypes = ["admin_user", "inquiry", "blog_post", "media_asset", "review", "site_settings"] as const;
 export type AuditEntityType = (typeof auditEntityTypes)[number];
 
 /** Who performed an action and from where. IPs are stored only as keyed hashes. */

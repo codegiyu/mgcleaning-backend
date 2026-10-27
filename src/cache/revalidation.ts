@@ -32,6 +32,21 @@ export function revalidationForPostChange(before: PublicState | null, after: Pub
   return { tags: [...tags], mode: removesSomething ? "remove" : "refresh" };
 }
 
+/** Website cache tag for the public reviews list. Keep in sync with the web app's review fetcher. */
+export const REVIEWS_TAG = "reviews";
+
+/**
+ * Which public cache entries a review change touches. A review leaving the site
+ * (unpublished or deleted, `after` null) must disappear at once; other changes to a
+ * published review can be served stale while they refresh.
+ */
+export function revalidationForReviewChange(before: { status: string } | null, after: { status: string } | null): RevalidationChange | null {
+  const wasPublic = before?.status === "published";
+  const isPublic = after?.status === "published";
+  if (!wasPublic && !isPublic) return null;
+  return { tags: [REVIEWS_TAG], mode: wasPublic && !isPublic ? "remove" : "refresh" };
+}
+
 type Insertable = Pick<ReturnType<typeof getDb>, "insert">;
 
 export async function queueRevalidation(executor: Insertable, change: RevalidationChange) {
