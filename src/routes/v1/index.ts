@@ -23,7 +23,7 @@ import {
 import { scoreInquiry } from "../../security/spam-score.js";
 import { verifyTurnstile } from "../../security/turnstile.js";
 import { adminRouter, publicBlogRouter } from "./admin.js";
-import { normalizeAttributionValue, normalizeLandingPath } from "../../attribution.js";
+import { describeAttribution, normalizeAttributionValue, normalizeLandingPath } from "../../attribution.js";
 
 const preferredContactMethods = ["phone", "whatsapp", "either"] as const;
 const preferredTimes = ["Morning (8am–12pm)", "Afternoon (12pm–4pm)", "Late afternoon (4pm–7pm)"] as const;
@@ -184,6 +184,7 @@ function createEmailOutboxRows(
     `Preferred time: ${input.preferredTime || "Not specified"}`,
     `Location: ${input.location || "Not specified"}`,
     `Space type: ${input.spaceType || "Not specified"}`,
+    `Came from: ${describeAttribution(input)}`,
     `Message: ${input.message}`,
   ];
   const customerMessage = [

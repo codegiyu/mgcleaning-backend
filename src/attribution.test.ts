@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { describeAttribution, normalizeAttributionValue, normalizeLandingPath } from "./attribution.js";
+import { createAdminRouter, type AdminRouterDependencies } from "./routes/v1/admin.js";
 import { createV1Router, type InquiryRouterDependencies, type ParsedInquiry } from "./routes/v1/index.js";
 
 const contactInquiry = {
@@ -85,5 +86,30 @@ describe("inquiry attribution contract", () => {
     const { router } = inquiryRouter();
     const response = await submit(router, { ...contactInquiry, utm_source: "instagram" }, "4f01d6f0-f7f7-4e5b-a343-3bdf3d2eaa93");
     expect(response.status).toBe(400);
+  });
+});
+
+describe("admin inquiry source filter", () => {
+  const token = "a-session-token-used-only-in-this-test";
+  const headers = { Cookie: `mg_admin_session=${token}` };
+
+  function router(listInquiries: AdminRouterDependencies["listInquiries"]) {
+    return createAdminRouter({
+      async resolveSession(value: string) { return value === token ? { id: "b48d4f5b-37e4-4f3b-bd0e-2ce9712dd4a5", email: "admin@example.test", sessionId: "c0ffee00-1d2e-4f3a-8b9c-0d1e2f3a4b5c" } : null; },
+      listInquiries,
+    } as unknown as AdminRouterDependencies); // Only session resolution and the list are exercised.
+  }
+
+  it("normalises the source filter", async () => {
+    const listInquiries = vi.fn<AdminRouterDependencies["listInquiries"]>(async () => ({ items: [], total: 0 }));
+    await router(listInquiries).request("/inquiries?source=Instagram", { headers });
+    expect(listInquiries).toHaveBeenCalledWith(expect.objectContaining({ source: "instagram" }));
+  });
+
+  it("supports direct traffic and rejects malformed filters", async () => {
+    const listInquiries = vi.fn<AdminRouterDependencies["listInquiries"]>(async () => ({ items: [], total: 0 }));
+    await router(listInquiries).request("/inquiries?source=direct", { headers });
+    expect(listInquiries).toHaveBeenCalledWith(expect.objectContaining({ source: "direct" }));
+    expect((await router(listInquiries).request("/inquiries?source=%3Cx%3E", { headers })).status).toBe(400);
   });
 });

@@ -1,8 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, count, desc, eq, gt, ilike, lt, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, ilike, isNull, lt, or, sql } from "drizzle-orm";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
+import { normalizeAttributionValue } from "../../attribution.js";
 import { auditContextFrom, changedFields, recordAudit, type AuditAction, type AuditContext } from "../../audit/audit.js";
 import { env } from "../../env.js";
 import { BLOG_POST_SLUG_CONSTRAINT, isUniqueViolation } from "../../db/errors.js";
@@ -63,7 +64,8 @@ export type AdminRouterDependencies = {
     emailOutboxCounts?: { pending: number; failed: number; deadLetter: number };
     cacheRevalidationCounts?: { pending: number; deadLetter: number };
   }>;
-  listInquiries: (query: PageQuery & { status: InquiryStatus | "all" }) => Promise<{
+  /** `source: "direct"` matches enquiries with no campaign source. */
+  listInquiries: (query: PageQuery & { status: InquiryStatus | "all"; source?: string }) => Promise<{
     items: InquiryRecord[];
     total: number;
   }>;
@@ -316,6 +318,7 @@ function buildProductionDependencies(): AdminRouterDependencies {
     async listInquiries(query) {
       const conditions = [];
       if (query.status !== "all") conditions.push(eq(contactInquiries.status, query.status));
+      if (query.source) conditions.push(query.source === "direct" ? isNull(contactInquiries.utmSource) : eq(contactInquiries.utmSource, query.source));
       if (query.query) {
         const search = `%${escapeLike(query.query)}%`;
         conditions.push(
@@ -569,10 +572,12 @@ export function createAdminRouter(
   router.get("/inquiries", async (context) => {
     const parsed = parsePageQuery(context);
     const status = context.req.query("status") ?? "all";
-    if (!parsed.success || !(status === "all" || inquiryStatuses.includes(status as InquiryStatus))) {
+    const rawSource = context.req.query("source");
+    const source = rawSource ? normalizeAttributionValue(rawSource) : undefined;
+    if (!parsed.success || !(status === "all" || inquiryStatuses.includes(status as InquiryStatus)) || (rawSource && !source)) {
       return context.json({ success: false as const, message: "Invalid inquiry filters.", responseCode: 400 }, 400);
     }
-    const result = await dependencies.listInquiries({ ...parsed.data, status: status as InquiryStatus | "all" });
+    const result = await dependencies.listInquiries({ ...parsed.data, status: status as InquiryStatus | "all", ...(source ? { source } : {}) });
     return context.json({ success: true as const, message: "Inquiries loaded.", responseCode: 200, data: pageResult(result.items, result.total, parsed.data) });
   });
 
