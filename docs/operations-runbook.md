@@ -1,0 +1,92 @@
+# MG Cleaning operations runbook
+
+How to release, verify, back up, restore, and roll back the MG Cleaning stack (the `mgcleaning` website and this API). Commands assume Coolify as described in the README; adjust container names to what Coolify shows.
+
+## Release checklist
+
+1. **Back up first.** Take an on-demand backup (see [Backups](#backups)) before any deploy that adds a migration.
+2. **Deploy the API stack.** Coolify builds the image, runs the one-shot `migrate` service, and starts `api` only after migrations succeed. A failed migration leaves the previous `api` container running.
+3. **Deploy the website** with the same build variables as before (`NEXT_PUBLIC_*` are inlined at build time).
+4. **Run the smoke test against staging twice in a row** (see below). Both runs must pass.
+5. **Promote to production** by deploying the same commits. Do not rebuild from a different commit than the one that passed staging.
+6. After production deploys, check `GET /api/v1/health`, sign in to `/admin`, and confirm the overview shows no email or website-update failures.
+
+## Staging smoke test
+
+`src/scripts/smoke.ts` exercises the whole stack: health → inquiry (with attribution) → team (and optional customer) email delivery → admin sign-in and cookie attributes → R2 cover upload and verification → publish → public API and website page → unpublish and cache purge → sign-out revoked server-side. It refuses hosts that do not look like staging unless `SMOKE_ALLOW_PRODUCTION=yes`.
+
+```sh
+SMOKE_API_URL=https://api.staging.<domain>/api/v1 \
+SMOKE_WEB_URL=https://staging.<domain> \
+SMOKE_ADMIN_EMAIL=<staging admin> \
+SMOKE_ADMIN_PASSWORD=<staging admin password> \
+SMOKE_CUSTOMER_EMAIL=<inbox you control, optional> \
+npm run smoke
+```
+
+Inside the API container use `node dist/scripts/smoke.js` with the same variables. Notes:
+
+- It sends real email: the team alert goes to the configured inquiry inbox, so point staging's inbox at a test mailbox.
+- Records it creates are marked `Smoke Test <run id>` / `smoke-<run id>`: the inquiry is closed and the article archived (there is no delete for either), and the uploaded image is deleted. Filter them out with the inbox's Source filter (`smoke`).
+- `SMOKE_SKIP_MEDIA=yes` skips upload, publishing, and cache checks when R2 is not configured yet.
+- A failed step exits non-zero; cleanup still runs and reports anything it could not undo.
+
+## Backups
+
+PostgreSQL holds every inquiry, article, audit event, and setting; the Docker volume alone is not a backup.
+
+- **Schedule:** daily at 02:00 WAT, plus on demand before each migration. Keep 14 daily and 8 weekly copies.
+- **Command** (Coolify scheduled task on the `postgres` service, or `docker exec` on the host):
+
+  ```sh
+  pg_dump --username "$POSTGRES_USER" --dbname mgcleaning --format custom --file /backups/mgcleaning-$(date +%F-%H%M).dump
+  ```
+
+- **Off-site copy:** copy each dump off the server (for example to a separate R2 bucket with its own write-only token). A backup on the same disk as the database does not survive losing the server. This is required before launch.
+- **Redis** holds only queues, rate limits, and short-lived keys. It does not need restoring; the email and cache outboxes in PostgreSQL are re-queued automatically.
+- **R2 media** objects are immutable and never overwritten. Deleted images are soft-deleted in the database first. Enable R2 bucket versioning or lifecycle rules if accidental-deletion recovery is required.
+
+## Restore drill
+
+Run `scripts/restore-drill.sh` after backups are first set up and then monthly. It restores into a database whose name must contain `restore` or `scratch`, then prints row counts and the number of applied migrations.
+
+```sh
+createdb mgcleaning_restore_check   # inside the postgres container or against a scratch server
+BACKUP_FILE=/backups/mgcleaning-2026-10-27-0200.dump \
+SCRATCH_DATABASE_URL=postgres://<user>:<pass>@localhost:5432/mgcleaning_restore_check \
+scripts/restore-drill.sh
+dropdb mgcleaning_restore_check
+```
+
+Compare the counts with production (`contact_inquiries`, `blog_posts`, `admin_users`) and record the date, backup file, duration, and result in the log at the end of this file.
+
+**Real restore (data loss or corruption):** stop the `api` service in Coolify so nothing writes, restore the chosen dump into the production database with `pg_restore --clean --if-exists --no-owner`, start `api`, run the post-deploy checks above, and tell the M&G team that inquiries received after the backup time must be re-entered from email.
+
+## Rollback
+
+**Application code:** in Coolify, redeploy the previous successful deployment of the affected app (website or API stack). This is the default response to a bad release; fix forward only for trivial issues.
+
+**Database:** migrations are forward-only and are never rolled back. Migrations `0006`–`0010` only add tables, nullable columns, defaulted columns, and indexes, so earlier API versions run against the newer schema with these caveats:
+
+| Rolling the API back to before | Do this first |
+|---|---|
+| Phase 2 (scheduling, cache purges) | Set any `scheduled` posts to `draft` (`UPDATE blog_posts SET status = 'draft', publish_at = NULL WHERE status = 'scheduled'`), because older code does not know that status. Cached pages then refresh only on the hourly backstop. |
+| Phase 1 (R2 uploads) | Nothing; posts keep their denormalised `cover_image_url`, but older editors cannot attach uploaded images. |
+| Phase 3 or 4 | Nothing; the new columns are ignored. |
+
+Restore from backup only for data loss, never as a substitute for code rollback.
+
+## Incident actions
+
+- **Admin locked out:** set `ADMIN_RESET_EMAIL` and `ADMIN_RESET_PASSWORD` in the API container, run `node dist/scripts/resetAdminPassword.js`, then remove both variables. All sessions for that account are revoked.
+- **Suspected admin account compromise:** reset the password as above, then sign out every admin everywhere with `DELETE FROM admin_sessions;`. Review `/admin/activity` for actions you do not recognise.
+- **Rotate secrets:** `INQUIRY_SECURITY_SECRET` (resets rate-limit and duplicate keys; harmless), `REVALIDATE_SECRET` (change on the website and API together, then redeploy both), R2 token (create the new token, update the four `R2_*` credentials, redeploy, then revoke the old token), `RESEND_API_KEY` (same order).
+- **Emails stuck in dead letter after a provider outage:** once the provider works again, re-queue them with `UPDATE email_outbox SET status = 'pending', attempts = 0, available_at = now(), last_error = NULL WHERE status = 'dead_letter';`. The API picks them up within 15 seconds.
+- **Website not reflecting an unpublish:** check the overview's "Website update failures", then re-queue with `UPDATE cache_revalidations SET status = 'pending', attempts = 0, available_at = now() WHERE status = 'dead_letter';`. For an immediate purge, redeploy the website (its cache lives in the container).
+- **Abuse wave on the inquiry form:** set `TURNSTILE_MODE=on` with `TURNSTILE_SECRET_KEY` on the API and `NEXT_PUBLIC_TURNSTILE_MODE=on` with the site key on the website, then redeploy both. Lower `INQUIRY_RATE_LIMIT_PER_WINDOW` if needed.
+
+## Restore drill log
+
+| Date | Backup file | Duration | Result | By |
+|---|---|---|---|---|
+| | | | | |

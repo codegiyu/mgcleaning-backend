@@ -93,6 +93,8 @@ Without the R2 variables, local development still runs; upload endpoints return 
 
 Logs are structured JSON (pino) with contact details and credentials redacted. Every response carries an `X-Request-Id` header (a well-formed incoming ID is reused), and each request log line includes it. Admin sign-ins, sign-outs, inquiry changes, and blog post changes are written to the append-only `admin_audit_events` table in the same transaction as the change; audit metadata records field names and status transitions, never contact details or note text, and IPs are stored only as keyed hashes.
 
+Release, smoke-test, backup, restore, and rollback procedures are in [`docs/operations-runbook.md`](docs/operations-runbook.md). Run the staging smoke test (`npm run smoke`, or `node dist/scripts/smoke.js` in the API container) twice before promoting a release, and run `scripts/restore-drill.sh` after setting up backups and then monthly. `GET /api/v1/admin/inquiries/:id` also returns each inquiry email's delivery status (`notifications`) without addresses or provider errors.
+
 Run `npm test`, `npm run typecheck`, and `npm run build` for checks. Generate a migration after schema changes with `npm run db:generate`, then review and apply it with `npm run db:migrate`.
 
 Compose credentials and endpoints are for local development only. Configure database, Redis, and Resend credentials through deployment environment variables; do not commit `.env` files.
