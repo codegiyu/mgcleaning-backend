@@ -26,6 +26,7 @@ import { adminRouter, publicBlogRouter } from "./admin.js";
 import { createPublicReviewsRouter } from "./reviews.js";
 import { describeAttribution, normalizeAttributionValue, normalizeLandingPath } from "../../attribution.js";
 import { FORM_RESPONSE_EXPECTATION, MESSAGE_RESPONSE_EXPECTATION } from "../../emails/response-expectation.js";
+import { buildAlertActions } from "../../emails/alert-actions.js";
 
 const preferredContactMethods = ["phone", "whatsapp", "either"] as const;
 const preferredTimes = ["Morning (8am–12pm)", "Afternoon (12pm–4pm)", "Late afternoon (4pm–7pm)"] as const;
@@ -174,7 +175,9 @@ export function createEmailOutboxRows(
   input: ParsedInquiry,
   inquiry: { id: string; reference: string },
   recipient: string,
+  adminOrigin: string = env.FRONTEND_ORIGIN,
 ): NewEmailOutbox[] {
+  const actions = buildAlertActions({ id: inquiry.id, reference: inquiry.reference, phone: input.phone, preferredContactMethod: input.preferredContactMethod }, adminOrigin);
   const details = [
     `Request reference: ${inquiry.reference}`,
     `Name: ${input.name}`,
@@ -211,6 +214,8 @@ export function createEmailOutboxRows(
       subject: `New M&G Cleaning Services ${input.inquiryType === "booking" ? "cleaning request" : "contact message"} · ${inquiry.reference}`,
       title: input.inquiryType === "booking" ? "New cleaning request" : "New contact message",
       message: details.join("\n\n"),
+      actions,
+      replyTo: input.email ?? null,
     },
   ];
   if (input.email) {

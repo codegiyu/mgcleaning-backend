@@ -10,6 +10,7 @@ import { logger as rootLogger } from "../logger.js";
 import { getDb } from "../db/client.js";
 import { emailOutbox } from "../db/schema/emailOutbox.js";
 import { NotificationEmail } from "../emails/notification.js";
+import { plainTextBody } from "../emails/alert-actions.js";
 import { enqueueEmail, EMAIL_QUEUE_NAME, type OutboundEmailJob } from "./email.queue.js";
 import { createWorkerRedisConnection } from "./redis.js";
 
@@ -69,15 +70,17 @@ export function startEmailWorker() {
 
       try {
         const html = await render(
-          <NotificationEmail title={outbox.title} message={outbox.message} />,
+          <NotificationEmail title={outbox.title} message={outbox.message} actions={outbox.actions} />,
         );
+        const text = plainTextBody(outbox.message, outbox.actions);
         if (resend) {
           const { error } = await resend.emails.send({
             from: env.EMAIL_FROM,
             to: outbox.to,
             subject: outbox.subject,
-            text: outbox.message,
+            text,
             html,
+            ...(outbox.replyTo ? { replyTo: outbox.replyTo } : {}),
           });
           if (error) {
             throw new Error(`Resend rejected email job ${job.id}: ${error.message}`);
@@ -87,8 +90,9 @@ export function startEmailWorker() {
             from: env.EMAIL_FROM,
             to: outbox.to,
             subject: outbox.subject,
-            text: outbox.message,
+            text,
             html,
+            ...(outbox.replyTo ? { replyTo: outbox.replyTo } : {}),
           });
         }
 
