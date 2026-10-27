@@ -15,6 +15,11 @@ export function pageResult<T>(items: T[], total: number, query: PageQuery) {
   return { items, total, page: query.page, pageSize: query.pageSize };
 }
 
+/** Escape LIKE wildcards so a search term matches literally. */
+export function escapeLike(value: string) {
+  return value.replace(/[\\%_]/g, "\\$&");
+}
+
 export function parsePageQuery(context: Context) {
   return pageSchema.safeParse({
     page: context.req.query("page"),

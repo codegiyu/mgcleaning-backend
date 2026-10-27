@@ -8,7 +8,7 @@ import { auditContextFrom, changedFields, recordAudit, type AuditAction, type Au
 import { env } from "../../env.js";
 import { BLOG_POST_SLUG_CONSTRAINT, isUniqueViolation } from "../../db/errors.js";
 import { getRequestLogger } from "../../request-context.js";
-import { pageResult, parsePageQuery, trustedOrigin, uuidSchema, type PageQuery } from "./admin-shared.js";
+import { escapeLike, pageResult, parsePageQuery, trustedOrigin, uuidSchema, type PageQuery } from "./admin-shared.js";
 import { createMediaRouter } from "./media.js";
 import { createAccountRouter, type SessionActor } from "./account.js";
 import { createOperationsRouter } from "./operations.js";
@@ -196,10 +196,6 @@ const inquiryPatchSchema = z
 
 function digestToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
-}
-
-function escapeLike(value: string) {
-  return value.replace(/[\\%_]/g, "\\$&");
 }
 
 async function createDatabaseSession(email: string, password: string, audit: AuditContext, client: LoginClient): Promise<LoginResult> {
