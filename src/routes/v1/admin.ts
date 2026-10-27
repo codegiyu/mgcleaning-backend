@@ -12,6 +12,7 @@ import { escapeLike, pageResult, parsePageQuery, trustedOrigin, uuidSchema, type
 import { createMediaRouter } from "./media.js";
 import { createAccountRouter, type SessionActor } from "./account.js";
 import { createOperationsRouter } from "./operations.js";
+import { countReviews, createReviewsAdminRouter, type ReviewCounts } from "./reviews.js";
 import { countRevalidations, notifyRevalidationQueued, queueRevalidation, revalidationForPostChange } from "../../cache/revalidation.js";
 import { hashPassword, verifyPassword } from "../../auth/password.js";
 import { allowLoginAttempt, clearLoginAttempts } from "../../auth/login-rate-limit.js";
@@ -69,6 +70,7 @@ export type AdminRouterDependencies = {
     postCounts: { draft: number; published: number };
     emailOutboxCounts?: { pending: number; failed: number; deadLetter: number };
     cacheRevalidationCounts?: { pending: number; deadLetter: number };
+    reviewCounts?: ReviewCounts;
   }>;
   /** `source: "direct"` matches enquiries with no campaign source. */
   listInquiries: (query: PageQuery & { status: InquiryStatus | "all"; source?: string }) => Promise<{
@@ -317,6 +319,7 @@ function buildProductionDependencies(): AdminRouterDependencies {
           deadLetter: Number(deadLetterEmails[0]?.total ?? 0),
         },
         cacheRevalidationCounts: await countRevalidations(),
+        reviewCounts: await countReviews(),
       };
     },
     async listInquiries(query) {
@@ -503,6 +506,7 @@ export function createAdminRouter(
   mediaRouter = createMediaRouter(),
   accountRouter = createAccountRouter(),
   operationsRouter = createOperationsRouter(),
+  reviewsRouter = createReviewsAdminRouter(),
 ) {
   const router = new Hono<{ Variables: { admin: SessionActor } }>();
 
@@ -690,6 +694,7 @@ export function createAdminRouter(
 
   router.route("/media", mediaRouter);
   router.route("/account", accountRouter);
+  router.route("/reviews", reviewsRouter);
   router.route("/", operationsRouter);
 
   return router;

@@ -23,6 +23,7 @@ import {
 import { scoreInquiry } from "../../security/spam-score.js";
 import { verifyTurnstile } from "../../security/turnstile.js";
 import { adminRouter, publicBlogRouter } from "./admin.js";
+import { createPublicReviewsRouter } from "./reviews.js";
 import { describeAttribution, normalizeAttributionValue, normalizeLandingPath } from "../../attribution.js";
 import { FORM_RESPONSE_EXPECTATION, MESSAGE_RESPONSE_EXPECTATION } from "../../emails/response-expectation.js";
 
@@ -331,6 +332,7 @@ export function createV1Router(
 
   router.route("/admin", adminRouter);
   router.route("/blog", publicBlogRouter);
+  router.route("/reviews", createPublicReviewsRouter());
 
   router.post(
     "/inquiries",
