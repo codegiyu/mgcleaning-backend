@@ -27,6 +27,13 @@ export const contactInquiries = pgTable(
     spaceType: varchar("space_type", { length: 120 }),
     message: text("message").notNull(),
     source: varchar("source", { length: 120 }).notNull().default("website"),
+    /** First-touch campaign attribution captured by the website; normalised lowercase tokens. */
+    utmSource: varchar("utm_source", { length: 120 }),
+    utmMedium: varchar("utm_medium", { length: 120 }),
+    utmCampaign: varchar("utm_campaign", { length: 120 }),
+    utmContent: varchar("utm_content", { length: 120 }),
+    /** First page of the visit (path only), e.g. the article an Instagram post linked to. */
+    landingPath: varchar("landing_path", { length: 200 }),
     status: varchar("status", { length: 32 }).notNull().default("new"),
     internalNote: text("internal_note"),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -36,7 +43,10 @@ export const contactInquiries = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (table) => [index("contact_inquiries_status_created_at_idx").on(table.status, table.createdAt)],
+  (table) => [
+    index("contact_inquiries_status_created_at_idx").on(table.status, table.createdAt),
+    index("contact_inquiries_utm_source_created_at_idx").on(table.utmSource, table.createdAt),
+  ],
 );
 
 export type ContactInquiry = typeof contactInquiries.$inferSelect;

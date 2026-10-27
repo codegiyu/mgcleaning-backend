@@ -23,6 +23,7 @@ import {
 import { scoreInquiry } from "../../security/spam-score.js";
 import { verifyTurnstile } from "../../security/turnstile.js";
 import { adminRouter, publicBlogRouter } from "./admin.js";
+import { normalizeAttributionValue, normalizeLandingPath } from "../../attribution.js";
 
 const preferredContactMethods = ["phone", "whatsapp", "either"] as const;
 const preferredTimes = ["Morning (8am–12pm)", "Afternoon (12pm–4pm)", "Late afternoon (4pm–7pm)"] as const;
@@ -114,6 +115,12 @@ const inquiryPayloadSchema = z
       .optional()
       .transform((value) => (value ? value : undefined)),
     message: z.string().trim().min(8).max(4_000),
+    // Attribution never fails validation: bad values are dropped so the enquiry is still saved.
+    utmSource: z.unknown().transform(normalizeAttributionValue).optional(),
+    utmMedium: z.unknown().transform(normalizeAttributionValue).optional(),
+    utmCampaign: z.unknown().transform(normalizeAttributionValue).optional(),
+    utmContent: z.unknown().transform(normalizeAttributionValue).optional(),
+    landingPath: z.unknown().transform(normalizeLandingPath).optional(),
   })
   .strict()
   .superRefine((value, context) => {
@@ -130,6 +137,8 @@ const inquiryPayloadSchema = z
   });
 
 export type CreateInquiryInput = z.input<typeof inquiryPayloadSchema>;
+/** What the route hands to persistence: validated, trimmed, and with attribution normalised. */
+export type ParsedInquiry = z.output<typeof inquiryPayloadSchema>;
 
 export type SavedInquiry = {
   id: string;
@@ -138,7 +147,7 @@ export type SavedInquiry = {
 };
 
 export type InquiryRouterDependencies = {
-  saveInquiry: (input: CreateInquiryInput, idempotencyKey: string) => Promise<SavedInquiry>;
+  saveInquiry: (input: ParsedInquiry, idempotencyKey: string) => Promise<SavedInquiry>;
   enqueueNotification: (job: OutboundEmailJob) => Promise<unknown>;
   notificationRecipient: string;
   onNotificationQueueFailure: (inquiryId: string, outboxId: string) => void;
@@ -160,7 +169,7 @@ function contactMethodLabel(value?: string) {
 }
 
 function createEmailOutboxRows(
-  input: CreateInquiryInput,
+  input: ParsedInquiry,
   inquiry: { id: string; reference: string },
   recipient: string,
 ): NewEmailOutbox[] {
@@ -264,6 +273,11 @@ const productionDependencies: InquiryRouterDependencies = {
           spaceType: input.spaceType ?? null,
           message: input.message,
           source: "website",
+          utmSource: input.utmSource ?? null,
+          utmMedium: input.utmMedium ?? null,
+          utmCampaign: input.utmCampaign ?? null,
+          utmContent: input.utmContent ?? null,
+          landingPath: input.landingPath ?? null,
         })
         .onConflictDoNothing({ target: contactInquiries.idempotencyKey })
         .returning({ id: contactInquiries.id, reference: contactInquiries.publicReference });
