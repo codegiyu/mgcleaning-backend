@@ -66,13 +66,14 @@ Compare the counts with production (`contact_inquiries`, `blog_posts`, `admin_us
 
 **Application code:** in Coolify, redeploy the previous successful deployment of the affected app (website or API stack). This is the default response to a bad release; fix forward only for trivial issues.
 
-**Database:** migrations are forward-only and are never rolled back. Migrations `0006`–`0010` only add tables, nullable columns, defaulted columns, and indexes, so earlier API versions run against the newer schema with these caveats:
+**Database:** migrations are forward-only and are never rolled back. Migrations `0006`–`0011` only add tables, nullable columns, defaulted columns, and indexes, so earlier API versions run against the newer schema with these caveats:
 
 | Rolling the API back to before | Do this first |
 |---|---|
 | Phase 2 (scheduling, cache purges) | Set any `scheduled` posts to `draft` (`UPDATE blog_posts SET status = 'draft', publish_at = NULL WHERE status = 'scheduled'`), because older code does not know that status. Cached pages then refresh only on the hourly backstop. |
 | Phase 1 (R2 uploads) | Nothing; posts keep their denormalised `cover_image_url`, but older editors cannot attach uploaded images. |
 | Phase 3 or 4 | Nothing; the new columns are ignored. |
+| Client-feedback Phase 2 (reviews) | Nothing; older code ignores the `reviews` table. If the website's reviews section has shipped, roll the website back too, or it shows no reviews once the API stops serving `/v1/reviews`. |
 
 Restore from backup only for data loss, never as a substitute for code rollback.
 
