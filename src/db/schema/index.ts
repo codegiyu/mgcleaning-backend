@@ -7,3 +7,4 @@ export * from "./adminAuditEvents.js";
 export * from "./mediaAssets.js";
 export * from "./cacheRevalidations.js";
 export * from "./siteSettings.js";
+export * from "./reviews.js";
