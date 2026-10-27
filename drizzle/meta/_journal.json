@@ -85,6 +85,13 @@
       "when": 1793089893194,
       "tag": "0011_reviews",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1793095626610,
+      "tag": "0012_alert_actions",
+      "breakpoints": true
     }
   ]
 }
