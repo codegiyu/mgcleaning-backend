@@ -24,6 +24,7 @@ import { scoreInquiry } from "../../security/spam-score.js";
 import { verifyTurnstile } from "../../security/turnstile.js";
 import { adminRouter, publicBlogRouter } from "./admin.js";
 import { describeAttribution, normalizeAttributionValue, normalizeLandingPath } from "../../attribution.js";
+import { FORM_RESPONSE_EXPECTATION, MESSAGE_RESPONSE_EXPECTATION } from "../../emails/response-expectation.js";
 
 const preferredContactMethods = ["phone", "whatsapp", "either"] as const;
 const preferredTimes = ["Morning (8am–12pm)", "Afternoon (12pm–4pm)", "Late afternoon (4pm–7pm)"] as const;
@@ -168,7 +169,7 @@ function contactMethodLabel(value?: string) {
   return value === "phone" ? "Phone call" : value === "whatsapp" ? "WhatsApp" : value === "either" ? "Phone or WhatsApp" : "Not specified";
 }
 
-function createEmailOutboxRows(
+export function createEmailOutboxRows(
   input: ParsedInquiry,
   inquiry: { id: string; reference: string },
   recipient: string,
@@ -197,10 +198,9 @@ function createEmailOutboxRows(
     `Preferred date: ${input.preferredDate || "Not specified"}`,
     `Preferred time: ${input.preferredTime || "Not specified"}`,
     "",
-    "This is a request, not a confirmed appointment. Our team will contact you to confirm availability and pricing.",
-    "We respond within one business day.",
+    `This is a request, not a confirmed appointment. ${FORM_RESPONSE_EXPECTATION}.`,
     "",
-    "If you need to reach us first, you can call or message us on WhatsApp using the contact details on our website.",
+    `For the fastest reply, message us on WhatsApp using the number on our website. ${MESSAGE_RESPONSE_EXPECTATION}.`,
   ].join("\n");
   const rows: NewEmailOutbox[] = [
     {
