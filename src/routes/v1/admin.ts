@@ -40,6 +40,12 @@ export type AdminActor = { id: string; email: string };
 type InquiryRecord = typeof contactInquiries.$inferSelect;
 type BlogPostRecord = typeof blogPosts.$inferSelect;
 export type LoginClient = { userAgent: string | null };
+export type InquiryNotification = {
+  kind: "internal" | "customer";
+  status: "pending" | "processing" | "sent" | "failed" | "dead_letter";
+  attempts: number;
+  sentAt: Date | null;
+};
 type LoginResult =
   | { kind: "success"; actor: AdminActor; token: string }
   | { kind: "invalid" }
@@ -70,6 +76,8 @@ export type AdminRouterDependencies = {
     total: number;
   }>;
   getInquiry: (id: string) => Promise<InquiryRecord | null>;
+  /** Delivery state of the inquiry's emails; never includes addresses or provider error text. */
+  getInquiryNotifications: (id: string) => Promise<InquiryNotification[]>;
   updateInquiry: (
     id: string,
     patch: { status?: InquiryStatus; internalNote?: string | null },
@@ -343,6 +351,14 @@ function buildProductionDependencies(): AdminRouterDependencies {
       ]);
       return { items, total: Number(totals[0]?.total ?? 0) };
     },
+    async getInquiryNotifications(id) {
+      const rows = await getDb()
+        .select({ kind: emailOutbox.kind, status: emailOutbox.status, attempts: emailOutbox.attempts, sentAt: emailOutbox.sentAt })
+        .from(emailOutbox)
+        .where(eq(emailOutbox.inquiryId, id))
+        .orderBy(emailOutbox.kind);
+      return rows as InquiryNotification[];
+    },
     async getInquiry(id) {
       const [item] = await getDb()
         .select()
@@ -588,7 +604,8 @@ export function createAdminRouter(
     }
     const item = await dependencies.getInquiry(id);
     if (!item) return context.json({ success: false as const, message: "Inquiry not found.", responseCode: 404 }, 404);
-    return context.json({ success: true as const, message: "Inquiry loaded.", responseCode: 200, data: item });
+    const notifications = await dependencies.getInquiryNotifications(id);
+    return context.json({ success: true as const, message: "Inquiry loaded.", responseCode: 200, data: { ...item, notifications } });
   });
 
   router.patch("/inquiries/:id", async (context) => {

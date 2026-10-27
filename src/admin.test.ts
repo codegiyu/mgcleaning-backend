@@ -47,6 +47,7 @@ function admin(dependencies: Partial<AdminRouterDependencies> = {}) {
     async getOverview() { return { inquiryCounts: { total: 0, new: 0 }, postCounts: { draft: 0, published: 0 } }; },
     async listInquiries() { return { items: [], total: 0 }; },
     async getInquiry() { return null; },
+    async getInquiryNotifications() { return []; },
     async updateInquiry() { return null; },
     async listPosts() { return { items: [], total: 0 }; },
     async getPost() { return null; },
