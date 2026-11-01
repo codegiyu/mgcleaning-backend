@@ -71,6 +71,13 @@ Published articles are exposed at `GET /api/v1/blog` and `GET /api/v1/blog/:slug
 - **Operator reset:** if an admin is locked out, set `ADMIN_RESET_EMAIL` and `ADMIN_RESET_PASSWORD` in the API container and run `node dist/scripts/resetAdminPassword.js` (`npm run admin:reset-password` locally). It sets the new password, revokes every session for that account, writes an audit event, and should be followed by removing the variables. The password is read from the environment rather than arguments so it does not appear in shell history or process lists. There is no emailed reset link by design.
 - **Activity:** `GET /api/v1/admin/audit` lists audit events newest first, filterable by `entityType` and `entityId`, with the acting admin's email. IP hashes are not returned.
 - **Reviews:** `GET`/`POST /api/v1/admin/reviews` and `GET`/`PATCH`/`DELETE /api/v1/admin/reviews/:id` manage customer reviews; the list also returns `counts` (`published`, `publishedThisYear` in WAT, `draft`). Reviews are plain text: one-line names and context with no markup or links, and a 20–600 character quote. Publishing needs `consentConfirmed: true` (422 otherwise), which records who confirmed the customer's agreement and when; consent cannot be withdrawn while a review is live, and the database enforces the same rule. `PATCH` takes `expectedUpdatedAt` in the body and `DELETE` takes it as a query parameter; a newer row returns 409 so concurrent edits are never silently overwritten. Delete is a hard delete, and its audit event keeps only the review id and previous status. Publishing, editing a live review, unpublishing, and deleting queue a purge of the website's `reviews` cache tag (unpublish and delete expire it immediately). `GET /api/v1/reviews` is public and returns up to 50 published reviews, featured first, with public fields only.
+- **Message taps:** `POST /api/v1/events/channel-click` counts taps on the website's WhatsApp, Instagram, and call links.
+  - The website sends it with `navigator.sendBeacon` as `text/plain` JSON, so there is no CORS preflight.
+  - The body may hold the `channel`, the `placement` (header, page, or footer), the page path, and the tab's first-touch UTM tags. Unknown fields are rejected, and campaign values are normalised or dropped.
+  - Requests must come from `FRONTEND_ORIGIN` (403 otherwise), the body is capped at 2 KB, and each hashed IP gets 30 taps per 10 minutes (429 beyond that).
+  - Responses are 204. If Redis is down, the tap is dropped rather than stored unchecked.
+  - Nothing that identifies a visitor is stored: no IP, user agent, or contact detail.
+  - The admin overview's `channelClicks` reports the last 30 days by channel and top sources.
 - **Settings:** `GET`/`PATCH /api/v1/admin/settings` holds operational values only: the inquiry-alert inbox (falling back to `INQUIRY_NOTIFICATION_TO` when cleared) and the default author for new articles. New inquiries read the inbox inside their own transaction. Public business facts and claims stay in the web app's governed content files.
 
 ## Scheduled publishing and website cache
@@ -102,7 +109,7 @@ Logs are structured JSON (pino) with contact details and credentials redacted. E
 
 Release, smoke-test, backup, restore, and rollback procedures are in [`docs/operations-runbook.md`](docs/operations-runbook.md). Run the staging smoke test (`npm run smoke`, or `node dist/scripts/smoke.js` in the API container) twice before promoting a release, and run `scripts/restore-drill.sh` after setting up backups and then monthly. `GET /api/v1/admin/inquiries/:id` also returns each inquiry email's delivery status (`notifications`) without addresses or provider errors.
 
-Run `npm test`, `npm run typecheck`, and `npm run build` for checks. Generate a migration after schema changes with `npm run db:generate`, then review and apply it with `npm run db:migrate`.
+Run `npm test`, `npm run typecheck`, and `npm run build` for checks. Generate a migration after schema changes with `npm run db:generate`, then review and apply it with `npm run db:migrate`. The schema starts from one migration, `drizzle/0000_initial.sql`, merged from the pre-launch history. Never edit or merge migrations once a database has applied them.
 
 Compose credentials and endpoints are for local development only. Configure database, Redis, and Resend credentials through deployment environment variables; do not commit `.env` files.
 
