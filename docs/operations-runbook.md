@@ -19,7 +19,7 @@ Both repositories run `.github/workflows/ci.yml` on pushes to `main` and `stagin
 - **Website checks:** lint, typecheck, unit tests, build, and the same audit.
 - **Website end-to-end:** the API and website run together, with Playwright on top.
 
-The website's end-to-end job checks out this repository and needs a `BACKEND_REPO_TOKEN` secret with read access. Deploy only commits whose CI is green.
+The website's end-to-end job checks out this repository (public, so no token is needed): `main` for pushes to `main`, otherwise `staging`. Merge this repository's `main` before the website's so that run tests the same API that deploys. Deploy only commits whose CI is green.
 
 ## Staging smoke test
 
