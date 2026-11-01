@@ -103,7 +103,14 @@ One-time Cloudflare setup:
 - Connect a custom domain (for example `media.<your-domain>`) to the bucket and set `R2_PUBLIC_URL` to it. Do not use the rate-limited `r2.dev` URL in production.
 - Add a bucket CORS rule allowing `PUT` and `HEAD` from the exact admin origins (local, staging, production) with allowed headers `Content-Type` and `Cache-Control`.
 
-Without the R2 variables, local development still runs; upload endpoints return 503. Production refuses to start without them.
+Without the R2 variables, local development still runs; upload endpoints return 503. With `NODE_ENV=production` the API refuses to start, listing every problem, unless:
+- all of `DATABASE_URL`, `REDIS_URL`, the R2 variables, and `REVALIDATE_SECRET` are set;
+- `INQUIRY_SECURITY_SECRET` is a random value of 32+ characters (not the development default);
+- `EMAIL_FROM` and `INQUIRY_NOTIFICATION_TO` are real addresses rather than `example.com`;
+- `FRONTEND_ORIGIN` is `https://`;
+- `RESEND_API_KEY` is set when `EMAIL_PROVIDER=resend`.
+
+The rules live in `parseEnv` (`src/env.ts`), with tests in `src/env.test.ts`.
 
 Logs are structured JSON (pino) with contact details and credentials redacted. Every response carries an `X-Request-Id` header (a well-formed incoming ID is reused), and each request log line includes it. Admin sign-ins, sign-outs, inquiry changes, and blog post changes are written to the append-only `admin_audit_events` table in the same transaction as the change; audit metadata records field names and status transitions, never contact details or note text, and IPs are stored only as keyed hashes.
 

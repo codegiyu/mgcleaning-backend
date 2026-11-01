@@ -10,7 +10,9 @@ const optionalUrl = z.preprocess(
   z.string().url().optional(),
 );
 
-export const env = z
+const DEV_INQUIRY_SECRET = "development-inquiry-security-secret";
+
+const envSchema = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     API_PORT: z.coerce.number().int().positive().default(4000),
@@ -33,7 +35,7 @@ export const env = z
     SMTP_PASSWORD: optionalString,
     EMAIL_FROM: z.string().email().default("notifications@example.com"),
     INQUIRY_NOTIFICATION_TO: z.string().email().default("inquiries@example.com"),
-    INQUIRY_SECURITY_SECRET: z.string().min(16).default("development-inquiry-security-secret"),
+    INQUIRY_SECURITY_SECRET: z.string().min(16).default(DEV_INQUIRY_SECRET),
     TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(0),
     INQUIRY_MAX_BODY_BYTES: z.coerce.number().int().positive().max(256_000).default(32_768),
     INQUIRY_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(900),
@@ -75,8 +77,27 @@ export const env = z
     if (value.NODE_ENV !== "production") return;
     // Uploads are a core admin workflow in production; refuse to start without storage.
     // Without the secret an unpublished article would stay in the public cache for up to an hour.
-    for (const key of ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET_NAME", "R2_PUBLIC_URL", "REVALIDATE_SECRET"] as const) {
+    for (const key of ["DATABASE_URL", "REDIS_URL", "R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET_NAME", "R2_PUBLIC_URL", "REVALIDATE_SECRET"] as const) {
       if (!value[key]) context.addIssue({ code: "custom", path: [key], message: `${key} is required in production.` });
     }
-  })
-  .parse(process.env);
+    // Development defaults must never reach production: they would sign requests with a
+    // public secret, send alerts to nobody, and trust the wrong website origin.
+    const refuse = (path: string, message: string) => context.addIssue({ code: "custom", path: [path], message });
+    if (value.INQUIRY_SECURITY_SECRET === DEV_INQUIRY_SECRET || value.INQUIRY_SECURITY_SECRET.length < 32) {
+      refuse("INQUIRY_SECURITY_SECRET", "Set a random INQUIRY_SECURITY_SECRET of at least 32 characters in production.");
+    }
+    for (const key of ["EMAIL_FROM", "INQUIRY_NOTIFICATION_TO"] as const) {
+      if (/@example\.(com|org|net)$/i.test(value[key])) refuse(key, `${key} must be a real address in production, not the example default.`);
+    }
+    if (!value.FRONTEND_ORIGIN.startsWith("https://")) refuse("FRONTEND_ORIGIN", "FRONTEND_ORIGIN must be the website's https:// origin in production.");
+    if (value.EMAIL_PROVIDER === "resend" && !value.RESEND_API_KEY) refuse("RESEND_API_KEY", "RESEND_API_KEY is required when EMAIL_PROVIDER=resend.");
+  });
+
+export type Env = z.output<typeof envSchema>;
+
+/** Validate a set of variables; the server refuses to start when this throws. */
+export function parseEnv(source: Record<string, string | undefined>): Env {
+  return envSchema.parse(source);
+}
+
+export const env = parseEnv(process.env);
