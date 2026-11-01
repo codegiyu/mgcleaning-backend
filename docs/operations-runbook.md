@@ -42,6 +42,13 @@ M&G promises a reply to messages within 15 minutes, so the team alert has to rea
 5. **Test it end to end:** run the smoke test (above) with the staging inbox, or send one real enquiry. Confirm on the officer's phone that the alert arrives, "Reply on WhatsApp" opens a chat with the customer, "Call" dials, and replying to the email addresses the customer.
 6. **If an alert does not arrive:** the inquiry record shows "Team alert: Failed/Dead letter", and the overview counts email failures. Check the Resend dashboard for the rejection reason. The worker retries failed sends with backoff before giving up.
 
+## Health checks
+
+- **`GET /api/v1/health`:** liveness only. The process is up.
+- **`GET /api/v1/health/ready`:** readiness. Postgres and Redis both answer within 2 seconds, otherwise it returns 503 naming the failed check (details go to the log). The image's `HEALTHCHECK` and the compose `api` health check use this endpoint, so an instance that loses its database or Redis is reported unhealthy.
+- **Crashes:** an unhandled error or rejection is logged at `fatal`, the API shuts down cleanly with exit code 1, and the orchestrator restarts it. If draining hangs for 15 seconds it exits anyway.
+- **Two builds of one image:** the `migrate` and `api` services each build the same image. With Docker's layer cache the second build is nearly free. They stay separate on purpose: a failed migration stops the deploy while the previous `api` container keeps serving.
+
 ## Accounts
 
 - **First owner:** after the first deploy, create the first owner with `admin:bootstrap:runtime`, then remove the bootstrap variables.
