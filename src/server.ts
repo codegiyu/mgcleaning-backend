@@ -14,6 +14,7 @@ import { startEmailWorker } from "./queue/email.worker.js";
 import { closeInquiryAbuseRedis } from "./security/inquiry-abuse.js";
 import { closeLoginRateLimitRedis } from "./auth/login-rate-limit.js";
 import { closeChannelClickRedis } from "./events/channel-clicks.js";
+import { closeReadinessRedis } from "./routes/v1/readiness.js";
 
 const emailWorker = startEmailWorker();
 const mediaMaintenance = startMediaMaintenance();
@@ -31,36 +32,55 @@ logger.info({ port: env.API_PORT }, "API listening");
 
 let isShuttingDown = false;
 
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.once(signal, () => {
-    if (isShuttingDown) return;
-    isShuttingDown = true;
-    mediaMaintenance.close();
-    revalidationDispatcher.close();
-    scheduledPublisher.close();
-    retention.close();
+/** Stop taking work, drain what is in flight, close pools, then exit (with `exitCode` if set). */
+function shutdown(reason: string, exitCode?: number) {
+  if (exitCode !== undefined) process.exitCode = exitCode;
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  logger.info({ reason }, "API shutting down");
+  mediaMaintenance.close();
+  revalidationDispatcher.close();
+  scheduledPublisher.close();
+  retention.close();
+  // If draining hangs, still exit so the container restarts rather than serving half-broken.
+  setTimeout(() => process.exit(process.exitCode ?? 1), 15_000).unref();
 
-    server.close((error) => {
-      if (error) {
-        logger.error({ err: error }, "API server shutdown failed");
-        process.exitCode = 1;
-      }
+  server.close((error) => {
+    if (error) {
+      logger.error({ err: error }, "API server shutdown failed");
+      process.exitCode = 1;
+    }
 
-      void Promise.allSettled([
-        emailWorker.close(),
-        closeEmailQueue(),
-        closeInquiryAbuseRedis(),
-        closeLoginRateLimitRedis(),
-        closeChannelClickRedis(),
-        closeDb(),
-      ]).then((results) => {
-        for (const result of results) {
-          if (result.status === "rejected") {
-            logger.error({ err: result.reason }, "backend resource shutdown failed");
-            process.exitCode = 1;
-          }
+    void Promise.allSettled([
+      emailWorker.close(),
+      closeEmailQueue(),
+      closeInquiryAbuseRedis(),
+      closeLoginRateLimitRedis(),
+      closeChannelClickRedis(),
+      closeReadinessRedis(),
+      closeDb(),
+    ]).then((results) => {
+      for (const result of results) {
+        if (result.status === "rejected") {
+          logger.error({ err: result.reason }, "backend resource shutdown failed");
+          process.exitCode = 1;
         }
-      });
+      }
     });
   });
 }
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.once(signal, () => shutdown(signal));
+}
+
+// Last-resort nets: an error nothing handled leaves the process in an unknown state, so
+// log it and shut down cleanly; the orchestrator restarts the container.
+process.on("unhandledRejection", (reason) => {
+  logger.fatal({ err: reason }, "unhandled promise rejection");
+  shutdown("unhandledRejection", 1);
+});
+process.on("uncaughtException", (error) => {
+  logger.fatal({ err: error }, "uncaught exception");
+  shutdown("uncaughtException", 1);
+});
