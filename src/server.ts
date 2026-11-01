@@ -7,6 +7,7 @@ import { env } from "./env.js";
 import { startScheduledPublisher } from "./blog/scheduler.js";
 import { startRevalidationDispatcher } from "./cache/revalidation.js";
 import { startMediaMaintenance } from "./media/maintenance.js";
+import { startRetention } from "./maintenance/retention.js";
 import { logger } from "./logger.js";
 import { closeEmailQueue } from "./queue/email.queue.js";
 import { startEmailWorker } from "./queue/email.worker.js";
@@ -18,6 +19,7 @@ const emailWorker = startEmailWorker();
 const mediaMaintenance = startMediaMaintenance();
 const revalidationDispatcher = startRevalidationDispatcher();
 const scheduledPublisher = startScheduledPublisher();
+const retention = startRetention();
 
 const server = serve({
   fetch: app.fetch,
@@ -36,6 +38,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     mediaMaintenance.close();
     revalidationDispatcher.close();
     scheduledPublisher.close();
+    retention.close();
 
     server.close((error) => {
       if (error) {
