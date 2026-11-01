@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { RETENTION, retentionCutoffs, runRetention, type RetentionDependencies } from "./maintenance/retention.js";
+import { createAdminRouter, type AdminRouterDependencies } from "./routes/v1/admin.js";
 
 const now = new Date("2026-11-01T12:00:00.000Z");
 const daysBefore = (days: number) => new Date(now.getTime() - days * 86_400_000).toISOString();
@@ -44,5 +45,32 @@ describe("runRetention", () => {
     const counts = await runRetention(now, dependencies, logger);
     expect(counts.emailBodiesScrubbed).toBe(-1);
     expect(counts.sessionsDeleted).toBe(4);
+  });
+});
+
+describe("DELETE /inquiries/:id", () => {
+  const token = "a-session-token-used-only-in-this-test";
+  const inquiryId = "3c2d57bc-11af-4c75-8b81-03a676cc1f55";
+  const headers = { Cookie: `mg_admin_session=${token}`, Origin: "http://localhost:3000" };
+
+  function app(role: "owner" | "staff", deleteInquiry: AdminRouterDependencies["deleteInquiry"]) {
+    const session = { id: "b48d4f5b-37e4-4f3b-bd0e-2ce9712dd4a5", email: "someone@example.test", sessionId: "c0ffee00-1d2e-4f3a-8b9c-0d1e2f3a4b5c", role, mustChangePassword: false };
+    const dependencies = { async resolveSession(value: string) { return value === token ? session : null; }, deleteInquiry } as unknown as AdminRouterDependencies; // Only this route is exercised.
+    return createAdminRouter(dependencies);
+  }
+
+  it("lets an owner delete an enquiry, recording who did it", async () => {
+    const deleteInquiry = vi.fn<AdminRouterDependencies["deleteInquiry"]>(async () => true);
+    const response = await app("owner", deleteInquiry).request(`/inquiries/${inquiryId}`, { method: "DELETE", headers });
+    expect(response.status).toBe(200);
+    expect(deleteInquiry).toHaveBeenCalledWith(inquiryId, expect.objectContaining({ actorId: "b48d4f5b-37e4-4f3b-bd0e-2ce9712dd4a5" }));
+  });
+
+  it("refuses staff, other origins, and unknown ids", async () => {
+    const deleteInquiry = vi.fn<AdminRouterDependencies["deleteInquiry"]>(async () => false);
+    expect((await app("staff", deleteInquiry).request(`/inquiries/${inquiryId}`, { method: "DELETE", headers })).status).toBe(403);
+    expect((await app("owner", deleteInquiry).request(`/inquiries/${inquiryId}`, { method: "DELETE", headers: { ...headers, Origin: "https://attacker.example" } })).status).toBe(403);
+    expect((await app("owner", deleteInquiry).request(`/inquiries/${inquiryId}`, { method: "DELETE", headers })).status).toBe(404);
+    expect((await app("owner", deleteInquiry).request("/inquiries/not-a-uuid", { method: "DELETE", headers })).status).toBe(404);
   });
 });

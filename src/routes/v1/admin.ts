@@ -8,7 +8,7 @@ import { auditContextFrom, changedFields, recordAudit, type AuditAction, type Au
 import { env } from "../../env.js";
 import { BLOG_POST_SLUG_CONSTRAINT, isUniqueViolation } from "../../db/errors.js";
 import { getRequestLogger } from "../../request-context.js";
-import { escapeLike, pageResult, parsePageQuery, trustedOrigin, uuidSchema, type PageQuery } from "./admin-shared.js";
+import { escapeLike, forbiddenOrigin, pageResult, parsePageQuery, requireOwner, trustedOrigin, uuidSchema, type PageQuery } from "./admin-shared.js";
 import { createMediaRouter } from "./media.js";
 import { createAccountRouter, type SessionActor } from "./account.js";
 import { createOperationsRouter } from "./operations.js";
@@ -91,6 +91,8 @@ export type AdminRouterDependencies = {
     patch: { status?: InquiryStatus; internalNote?: string | null },
     audit: AuditContext,
   ) => Promise<InquiryRecord | null>;
+  /** Permanently removes an enquiry and its emails, e.g. on a customer's erasure request. */
+  deleteInquiry: (id: string, audit: AuditContext) => Promise<boolean>;
   listPosts: (query: PageQuery & { status: PostStatus | "all" }) => Promise<{
     items: BlogPostRecord[];
     total: number;
@@ -383,6 +385,18 @@ function buildProductionDependencies(): AdminRouterDependencies {
         .limit(1);
       return item ?? null;
     },
+    async deleteInquiry(id, audit) {
+      return getDb().transaction(async (tx) => {
+        // email_outbox rows cascade; the audit keeps the reference so the request can be evidenced.
+        const [deleted] = await tx
+          .delete(contactInquiries)
+          .where(eq(contactInquiries.id, id))
+          .returning({ id: contactInquiries.id, reference: contactInquiries.publicReference });
+        if (!deleted) return false;
+        await recordAudit(tx, audit, { action: "inquiry.delete", entityType: "inquiry", entityId: id, metadata: { reference: deleted.reference } });
+        return true;
+      });
+    },
     async updateInquiry(id, patch, audit) {
       return getDb().transaction(async (tx) => {
         const [existing] = await tx
@@ -645,6 +659,17 @@ export function createAdminRouter(
     const item = await dependencies.updateInquiry(id, parsed.data, auditContextFrom(context, context.get("admin").id));
     if (!item) return context.json({ success: false as const, message: "Inquiry not found.", responseCode: 404 }, 404);
     return context.json({ success: true as const, message: "Inquiry updated.", responseCode: 200, data: item });
+  });
+
+  router.delete("/inquiries/:id", requireOwner, async (context) => {
+    if (!trustedOrigin(context)) return forbiddenOrigin(context);
+    const id = context.req.param("id");
+    if (!uuidSchema.safeParse(id).success) {
+      return context.json({ success: false as const, message: "Inquiry not found.", responseCode: 404 }, 404);
+    }
+    const deleted = await dependencies.deleteInquiry(id, auditContextFrom(context, context.get("admin").id));
+    if (!deleted) return context.json({ success: false as const, message: "Inquiry not found.", responseCode: 404 }, 404);
+    return context.json({ success: true as const, message: "Inquiry deleted.", responseCode: 200, data: { deleted: true as const } });
   });
 
   router.get("/blog/posts", async (context) => {

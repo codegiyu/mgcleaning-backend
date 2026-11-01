@@ -49,6 +49,7 @@ function admin(dependencies: Partial<AdminRouterDependencies> = {}) {
     async getInquiry() { return null; },
     async getInquiryNotifications() { return []; },
     async updateInquiry() { return null; },
+    async deleteInquiry() { return true; },
     async listPosts() { return { items: [], total: 0 }; },
     async getPost() { return null; },
     async createPost(input) { return { kind: "created", post: postFromInput(input) }; },
