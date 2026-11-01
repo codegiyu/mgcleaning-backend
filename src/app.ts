@@ -1,4 +1,5 @@
 import { cors } from "hono/cors";
+import { secureHeaders } from "hono/secure-headers";
 import { Hono } from "hono";
 import { env } from "./env.js";
 import { logger } from "./logger.js";
@@ -8,6 +9,17 @@ import { v1Router } from "./routes/v1/index.js";
 export const app = new Hono<{ Variables: RequestContextVariables }>();
 
 app.use("*", requestContext());
+
+// The API only returns JSON: nothing in a response should ever load, run, or be framed.
+// Resources are same-site, not same-origin, because the website calls the API from its own origin.
+app.use(
+  "*",
+  secureHeaders({
+    contentSecurityPolicy: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] },
+    crossOriginResourcePolicy: "same-site",
+    strictTransportSecurity: env.NODE_ENV === "production" ? "max-age=31536000; includeSubDomains" : false,
+  }),
+);
 
 app.use(
   "/api/*",
@@ -21,6 +33,10 @@ app.use(
 );
 
 app.route("/api/v1", v1Router);
+
+app.notFound((context) =>
+  context.json({ success: false as const, message: "Not found.", responseCode: 404 }, 404),
+);
 
 app.onError((error, context) => {
   (context.get("logger") ?? logger).error(

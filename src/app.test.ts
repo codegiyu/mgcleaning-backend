@@ -77,6 +77,23 @@ describe("GET /api/v1/health", () => {
   });
 });
 
+describe("security headers and unknown routes", () => {
+  it("sends hardening headers that still let the website read responses", async () => {
+    const response = await app.request("/api/v1/health");
+    expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(response.headers.get("X-Frame-Options")).toBe("SAMEORIGIN");
+    expect(response.headers.get("Content-Security-Policy")).toBe("default-src 'none'; frame-ancestors 'none'");
+    expect(response.headers.get("Cross-Origin-Resource-Policy")).toBe("same-site");
+    expect(response.headers.get("Strict-Transport-Security")).toBeNull();
+  });
+
+  it("answers unknown routes with the JSON envelope", async () => {
+    const response = await app.request("/api/v1/nope");
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ success: false, message: "Not found.", responseCode: 404 });
+  });
+});
+
 describe("CORS", () => {
   it("allows the headers the website sends with an inquiry", async () => {
     const response = await app.request("/api/v1/inquiries", {
