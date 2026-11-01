@@ -17,6 +17,11 @@ const validInquiry: CreateInquiryInput = {
   message: "Please contact me about cleaning my sofa.",
 };
 
+/** A UTC calendar date `days` from today, so date-window validation never ages out. */
+function futureDate(days: number) {
+  return new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+}
+
 function makeInquiryRouter(
   overrides: Partial<InquiryRouterDependencies> = {},
 ) {
@@ -68,6 +73,43 @@ describe("GET /api/v1/health", () => {
         status: "ok",
       },
     });
+    expect(response.headers.get("X-Request-Id")).toBeTruthy();
+  });
+});
+
+describe("security headers and unknown routes", () => {
+  it("sends hardening headers that still let the website read responses", async () => {
+    const response = await app.request("/api/v1/health");
+    expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(response.headers.get("X-Frame-Options")).toBe("SAMEORIGIN");
+    expect(response.headers.get("Content-Security-Policy")).toBe("default-src 'none'; frame-ancestors 'none'");
+    expect(response.headers.get("Cross-Origin-Resource-Policy")).toBe("same-site");
+    expect(response.headers.get("Strict-Transport-Security")).toBeNull();
+  });
+
+  it("answers unknown routes with the JSON envelope", async () => {
+    const response = await app.request("/api/v1/nope");
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ success: false, message: "Not found.", responseCode: 404 });
+  });
+});
+
+describe("CORS", () => {
+  it("allows the headers the website sends with an inquiry", async () => {
+    const response = await app.request("/api/v1/inquiries", {
+      method: "OPTIONS",
+      headers: {
+        Origin: "http://localhost:3000",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "content-type,idempotency-key",
+      },
+    });
+    const allowed = response.headers.get("Access-Control-Allow-Headers")?.toLowerCase() ?? "";
+
+    expect(response.status).toBe(204);
+    expect(allowed).toContain("content-type");
+    expect(allowed).toContain("idempotency-key");
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBe("http://localhost:3000");
   });
 });
 
@@ -126,7 +168,7 @@ describe("POST /api/v1/inquiries", () => {
       email: "mary@example.test",
       inquiryType: "booking",
       serviceInterest: "Upholstery cleaning",
-      preferredDate: "2026-10-04",
+      preferredDate: futureDate(7),
       preferredTime: "Morning (8am–12pm)",
       preferredContactMethod: "whatsapp",
       location: "Lekki Phase 1, Lagos",

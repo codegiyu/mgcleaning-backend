@@ -5,36 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1789325270516,
-      "tag": "0000_milky_miracleman",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1789353379714,
-      "tag": "0001_square_skullbuster",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1790630577168,
-      "tag": "0002_bouncy_whiplash",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1790635823770,
-      "tag": "0003_fuzzy_sleeper",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1790642819478,
-      "tag": "0004_dear_penance",
+      "when": 1793552952855,
+      "tag": "0000_initial",
       "breakpoints": true
     }
   ]

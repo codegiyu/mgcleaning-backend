@@ -3,6 +3,7 @@ import type { Context } from "hono";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { Redis } from "ioredis";
 import { env } from "../env.js";
+import { lazyProducerConnection } from "../queue/redis.js";
 
 export type InquiryAbuseInput = {
   email?: string;
@@ -41,16 +42,14 @@ end
 return 0
 `;
 
-let redis: Redis | undefined;
-
-function getRedis() {
+const connection = lazyProducerConnection(() => {
   const redisUrl = process.env.REDIS_URL;
   if (!redisUrl) throw new Error("REDIS_URL is required for inquiry abuse protection.");
-  return (redis ??= new Redis(redisUrl, {
+  return new Redis(redisUrl, {
     enableOfflineQueue: false,
     maxRetriesPerRequest: 1,
-  }));
-}
+  });
+});
 
 function digest(value: string) {
   return createHmac("sha256", env.INQUIRY_SECURITY_SECRET).update(value).digest("hex");
@@ -69,12 +68,21 @@ function normalizeIp(value: string) {
   return normalized.startsWith("::ffff:") ? normalized.slice(7) : normalized;
 }
 
+/**
+ * Each trusted proxy appends the address it received the request from, so the
+ * client is `trustedHops` entries from the right. Entries further left are
+ * client-supplied and must not be trusted.
+ */
+export function clientIpFromForwardedFor(header: string | undefined, trustedHops: number) {
+  if (!header || trustedHops < 1) return null;
+  const entries = header.split(",").map((entry) => entry.trim()).filter(Boolean);
+  const candidate = entries[entries.length - trustedHops];
+  return candidate ? normalizeIp(candidate) : null;
+}
+
 export function resolveClientIp(context: Context) {
-  if (env.TRUST_PROXY_HOPS > 0) {
-    const forwarded = context.req.header("x-forwarded-for");
-    const firstForwarded = forwarded?.split(",")[0];
-    if (firstForwarded?.trim()) return normalizeIp(firstForwarded);
-  }
+  const forwardedIp = clientIpFromForwardedFor(context.req.header("x-forwarded-for"), env.TRUST_PROXY_HOPS);
+  if (forwardedIp) return forwardedIp;
 
   try {
     const address = getConnInfo(context).remote.address;
@@ -94,7 +102,8 @@ export async function allowInquiryRequest(
     ...(input.email ? [{ key: `inquiry:rate:email:day:${digest(normalizeEmail(input.email))}`, limit: env.INQUIRY_IDENTITY_LIMIT_PER_DAY, ttl: env.INQUIRY_RATE_LIMIT_DAY_SECONDS, reason: "email-day" as const }] : []),
     ...(input.phone ? [{ key: `inquiry:rate:phone:day:${digest(normalizePhone(input.phone))}`, limit: env.INQUIRY_IDENTITY_LIMIT_PER_DAY, ttl: env.INQUIRY_RATE_LIMIT_DAY_SECONDS, reason: "phone-day" as const }] : []),
   ];
-  const result = (await getRedis().eval(
+  const redis = await connection.get();
+  const result = (await redis.eval(
     rateLimitScript,
     keyInputs.length,
     ...keyInputs.flatMap((item) => [item.key]),
@@ -123,17 +132,16 @@ export function createInquiryFingerprint(input: Record<string, string | undefine
 
 export async function claimInquiryFingerprint(fingerprint: string, idempotencyKey: string) {
   const key = `inquiry:fingerprint:${fingerprint}`;
-  const result = await getRedis().set(key, idempotencyKey, "EX", env.INQUIRY_FINGERPRINT_TTL_SECONDS, "NX");
+  const redis = await connection.get();
+  const result = await redis.set(key, idempotencyKey, "EX", env.INQUIRY_FINGERPRINT_TTL_SECONDS, "NX");
   if (result === "OK") return { claimed: true, owner: true, key, value: idempotencyKey };
-  const existingValue = await getRedis().get(key);
+  const existingValue = await redis.get(key);
   return { claimed: existingValue === idempotencyKey, owner: false, key, value: idempotencyKey };
 }
 
 export async function releaseInquiryFingerprint(key: string, value: string) {
-  await getRedis().eval(releaseFingerprintScript, 1, key, value);
+  const redis = await connection.get();
+  await redis.eval(releaseFingerprintScript, 1, key, value);
 }
 
-export async function closeInquiryAbuseRedis() {
-  await redis?.quit();
-  redis = undefined;
-}
+export const closeInquiryAbuseRedis = () => connection.close();

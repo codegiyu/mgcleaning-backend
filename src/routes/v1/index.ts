@@ -5,6 +5,9 @@ import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import type { Context } from "hono";
 import { env } from "../../env.js";
+import { logger } from "../../logger.js";
+import { getRequestLogger } from "../../request-context.js";
+import { effectiveNotificationEmail, readSiteSettings } from "../../settings/site-settings.js";
 import { getDb } from "../../db/client.js";
 import { contactInquiries } from "../../db/schema/contactInquiries.js";
 import { emailOutbox, type NewEmailOutbox } from "../../db/schema/emailOutbox.js";
@@ -20,6 +23,12 @@ import {
 import { scoreInquiry } from "../../security/spam-score.js";
 import { verifyTurnstile } from "../../security/turnstile.js";
 import { adminRouter, publicBlogRouter } from "./admin.js";
+import { createPublicReviewsRouter } from "./reviews.js";
+import { createEventsRouter } from "./events.js";
+import { createReadinessRouter } from "./readiness.js";
+import { describeAttribution, normalizeAttributionValue, normalizeLandingPath } from "../../attribution.js";
+import { FORM_RESPONSE_EXPECTATION, MESSAGE_RESPONSE_EXPECTATION } from "../../emails/response-expectation.js";
+import { buildAlertActions } from "../../emails/alert-actions.js";
 
 const preferredContactMethods = ["phone", "whatsapp", "either"] as const;
 const preferredTimes = ["Morning (8am–12pm)", "Afternoon (12pm–4pm)", "Late afternoon (4pm–7pm)"] as const;
@@ -111,6 +120,12 @@ const inquiryPayloadSchema = z
       .optional()
       .transform((value) => (value ? value : undefined)),
     message: z.string().trim().min(8).max(4_000),
+    // Attribution never fails validation: bad values are dropped so the enquiry is still saved.
+    utmSource: z.unknown().transform(normalizeAttributionValue).optional(),
+    utmMedium: z.unknown().transform(normalizeAttributionValue).optional(),
+    utmCampaign: z.unknown().transform(normalizeAttributionValue).optional(),
+    utmContent: z.unknown().transform(normalizeAttributionValue).optional(),
+    landingPath: z.unknown().transform(normalizeLandingPath).optional(),
   })
   .strict()
   .superRefine((value, context) => {
@@ -127,6 +142,8 @@ const inquiryPayloadSchema = z
   });
 
 export type CreateInquiryInput = z.input<typeof inquiryPayloadSchema>;
+/** What the route hands to persistence: validated, trimmed, and with attribution normalised. */
+export type ParsedInquiry = z.output<typeof inquiryPayloadSchema>;
 
 export type SavedInquiry = {
   id: string;
@@ -135,7 +152,7 @@ export type SavedInquiry = {
 };
 
 export type InquiryRouterDependencies = {
-  saveInquiry: (input: CreateInquiryInput, idempotencyKey: string) => Promise<SavedInquiry>;
+  saveInquiry: (input: ParsedInquiry, idempotencyKey: string) => Promise<SavedInquiry>;
   enqueueNotification: (job: OutboundEmailJob) => Promise<unknown>;
   notificationRecipient: string;
   onNotificationQueueFailure: (inquiryId: string, outboxId: string) => void;
@@ -156,11 +173,13 @@ function contactMethodLabel(value?: string) {
   return value === "phone" ? "Phone call" : value === "whatsapp" ? "WhatsApp" : value === "either" ? "Phone or WhatsApp" : "Not specified";
 }
 
-function createEmailOutboxRows(
-  input: CreateInquiryInput,
+export function createEmailOutboxRows(
+  input: ParsedInquiry,
   inquiry: { id: string; reference: string },
   recipient: string,
+  adminOrigin: string = env.FRONTEND_ORIGIN,
 ): NewEmailOutbox[] {
+  const actions = buildAlertActions({ id: inquiry.id, reference: inquiry.reference, phone: input.phone, preferredContactMethod: input.preferredContactMethod }, adminOrigin);
   const details = [
     `Request reference: ${inquiry.reference}`,
     `Name: ${input.name}`,
@@ -172,6 +191,7 @@ function createEmailOutboxRows(
     `Preferred time: ${input.preferredTime || "Not specified"}`,
     `Location: ${input.location || "Not specified"}`,
     `Space type: ${input.spaceType || "Not specified"}`,
+    `Came from: ${describeAttribution(input)}`,
     `Message: ${input.message}`,
   ];
   const customerMessage = [
@@ -184,19 +204,20 @@ function createEmailOutboxRows(
     `Preferred date: ${input.preferredDate || "Not specified"}`,
     `Preferred time: ${input.preferredTime || "Not specified"}`,
     "",
-    "This is a request, not a confirmed appointment. Our team will contact you to confirm availability and pricing.",
-    "We respond within one business day.",
+    `This is a request, not a confirmed appointment. ${FORM_RESPONSE_EXPECTATION}.`,
     "",
-    "If you need to reach us first, you can call or message us on WhatsApp using the contact details on our website.",
+    `For the fastest reply, message us on WhatsApp using the number on our website. ${MESSAGE_RESPONSE_EXPECTATION}.`,
   ].join("\n");
   const rows: NewEmailOutbox[] = [
     {
       inquiryId: inquiry.id,
       kind: "internal",
       to: recipient,
-      subject: `New M&G Cleaning Service ${input.inquiryType === "booking" ? "cleaning request" : "contact message"} · ${inquiry.reference}`,
+      subject: `New M&G Cleaning Services ${input.inquiryType === "booking" ? "cleaning request" : "contact message"} · ${inquiry.reference}`,
       title: input.inquiryType === "booking" ? "New cleaning request" : "New contact message",
       message: details.join("\n\n"),
+      actions,
+      replyTo: input.email ?? null,
     },
   ];
   if (input.email) {
@@ -204,7 +225,7 @@ function createEmailOutboxRows(
       inquiryId: inquiry.id,
       kind: "customer",
       to: input.email,
-      subject: `M&G Cleaning Service request received · ${inquiry.reference}`,
+      subject: `M&G Cleaning Services request received · ${inquiry.reference}`,
       title: "Your cleaning request has been received",
       message: customerMessage,
     });
@@ -261,6 +282,11 @@ const productionDependencies: InquiryRouterDependencies = {
           spaceType: input.spaceType ?? null,
           message: input.message,
           source: "website",
+          utmSource: input.utmSource ?? null,
+          utmMedium: input.utmMedium ?? null,
+          utmCampaign: input.utmCampaign ?? null,
+          utmContent: input.utmContent ?? null,
+          landingPath: input.landingPath ?? null,
         })
         .onConflictDoNothing({ target: contactInquiries.idempotencyKey })
         .returning({ id: contactInquiries.id, reference: contactInquiries.publicReference });
@@ -271,7 +297,8 @@ const productionDependencies: InquiryRouterDependencies = {
         return saved;
       }
 
-      const rows = createEmailOutboxRows(input, inquiry, env.INQUIRY_NOTIFICATION_TO);
+      // Read inside the transaction so the alert goes to the inbox configured when the inquiry was saved.
+      const rows = createEmailOutboxRows(input, inquiry, effectiveNotificationEmail(await readSiteSettings(tx)));
       const outbox = await tx
         .insert(emailOutbox)
         .values(rows)
@@ -284,10 +311,7 @@ const productionDependencies: InquiryRouterDependencies = {
   },
   notificationRecipient: env.INQUIRY_NOTIFICATION_TO,
   onNotificationQueueFailure(inquiryId, outboxId) {
-    console.warn("Inquiry email was saved but its notification was not queued.", {
-      inquiryId,
-      outboxId,
-    });
+    logger.warn({ inquiryId, outboxId }, "inquiry saved but its notification was not queued");
   },
   allowRequest: ({ ip, email, phone }) => allowInquiryRequest({ ip, email, phone }),
   resolveClientIp,
@@ -313,8 +337,11 @@ export function createV1Router(
     }),
   );
 
+  router.route("/health/ready", createReadinessRouter());
   router.route("/admin", adminRouter);
   router.route("/blog", publicBlogRouter);
+  router.route("/reviews", createPublicReviewsRouter());
+  router.route("/events", createEventsRouter());
 
   router.post(
     "/inquiries",
@@ -359,7 +386,7 @@ export function createV1Router(
     try {
       rateLimit = await allowRequest({ ip: clientIp, email: parsed.data.email, phone: parsed.data.phone });
     } catch {
-      console.error("Inquiry rate limiter unavailable.");
+      getRequestLogger(context).error("inquiry rate limiter unavailable");
       return context.json({ success: false as const, message: "Requests are temporarily unavailable. Please try again shortly.", responseCode: 503 }, 503);
     }
     if (!rateLimit.allowed) {
@@ -372,17 +399,17 @@ export function createV1Router(
     }
 
     if (parsed.data.companyWebsite) {
-      console.info("Inquiry rejected by honeypot.");
+      getRequestLogger(context).info("inquiry rejected by honeypot");
       return context.json({ success: false as const, message: "Please check the form details and try again.", responseCode: 400 }, 400);
     }
 
     const spamScore = scoreInquiry(parsed.data);
     if (spamScore.band === "high") {
-      console.info("Inquiry rejected by spam score.", { score: spamScore.score, signals: spamScore.signals });
+      getRequestLogger(context).info({ score: spamScore.score, signals: spamScore.signals }, "inquiry rejected by spam score");
       return context.json({ success: false as const, message: "Please check the form details and try again.", responseCode: 400 }, 400);
     }
     if (spamScore.band === "medium" && !(await verifyChallenge(parsed.data.turnstileToken, clientIp))) {
-      console.info("Inquiry rejected by challenge verification.", { score: spamScore.score, signals: spamScore.signals });
+      getRequestLogger(context).info({ score: spamScore.score, signals: spamScore.signals }, "inquiry rejected by challenge verification");
       return context.json({ success: false as const, message: "Please complete the verification and try again.", responseCode: 403 }, 403);
     }
 
@@ -391,7 +418,7 @@ export function createV1Router(
     try {
       fingerprintClaim = await claimFingerprint(fingerprint, idempotencyKey);
     } catch {
-      console.error("Inquiry duplicate protection unavailable.");
+      getRequestLogger(context).error("inquiry duplicate protection unavailable");
       return context.json({ success: false as const, message: "Requests are temporarily unavailable. Please try again shortly.", responseCode: 503 }, 503);
     }
     if (!fingerprintClaim.claimed) {

@@ -6,13 +6,16 @@ import { render } from "react-email";
 import nodemailer from "nodemailer";
 import { Resend } from "resend";
 import { env } from "../env.js";
+import { logger as rootLogger } from "../logger.js";
 import { getDb } from "../db/client.js";
 import { emailOutbox } from "../db/schema/emailOutbox.js";
 import { NotificationEmail } from "../emails/notification.js";
+import { plainTextBody } from "../emails/alert-actions.js";
 import { enqueueEmail, EMAIL_QUEUE_NAME, type OutboundEmailJob } from "./email.queue.js";
 import { createWorkerRedisConnection } from "./redis.js";
 
 export function startEmailWorker() {
+  const logger = rootLogger.child({ component: "email-worker" });
   const resend =
     env.EMAIL_PROVIDER === "resend"
       ? (() => {
@@ -67,15 +70,17 @@ export function startEmailWorker() {
 
       try {
         const html = await render(
-          <NotificationEmail title={outbox.title} message={outbox.message} />,
+          <NotificationEmail title={outbox.title} message={outbox.message} actions={outbox.actions} />,
         );
+        const text = plainTextBody(outbox.message, outbox.actions);
         if (resend) {
           const { error } = await resend.emails.send({
             from: env.EMAIL_FROM,
             to: outbox.to,
             subject: outbox.subject,
-            text: outbox.message,
+            text,
             html,
+            ...(outbox.replyTo ? { replyTo: outbox.replyTo } : {}),
           });
           if (error) {
             throw new Error(`Resend rejected email job ${job.id}: ${error.message}`);
@@ -85,8 +90,9 @@ export function startEmailWorker() {
             from: env.EMAIL_FROM,
             to: outbox.to,
             subject: outbox.subject,
-            text: outbox.message,
+            text,
             html,
+            ...(outbox.replyTo ? { replyTo: outbox.replyTo } : {}),
           });
         }
 
@@ -115,16 +121,15 @@ export function startEmailWorker() {
     { connection: redis, concurrency: 5 },
   );
 
-  worker.on("completed", (job) => console.info(`Email job ${job.id} completed.`));
+  worker.on("completed", (job) => logger.info({ jobId: job.id }, "email job completed"));
   worker.on("failed", (job, error) => {
-    console.error("Email job failed.", {
-      jobId: job?.id ?? "unknown",
-      outboxId: job?.data.outboxId,
-      errorType: error instanceof Error ? error.name : "unknown",
-    });
+    logger.error(
+      { jobId: job?.id ?? "unknown", outboxId: job?.data.outboxId, errorType: error instanceof Error ? error.name : "unknown" },
+      "email job failed",
+    );
   });
   worker.on("error", (error) => {
-    console.error("Email worker error.", error);
+    logger.error({ err: error }, "email worker error");
   });
 
   async function enqueuePendingOutbox() {
@@ -146,7 +151,7 @@ export function startEmailWorker() {
         .limit(100);
       await Promise.all(pending.map((item) => enqueueEmail({ outboxId: item.id })));
     } catch (error) {
-      console.error("Email outbox recovery scan failed.", error);
+      logger.error({ err: error }, "email outbox recovery scan failed");
     }
   }
 
@@ -154,7 +159,7 @@ export function startEmailWorker() {
   const recoveryTimer = setInterval(() => void enqueuePendingOutbox(), 15_000);
   recoveryTimer.unref();
 
-  console.info(`MG Cleaning email worker started with ${env.EMAIL_PROVIDER}.`);
+  logger.info({ provider: env.EMAIL_PROVIDER }, "email worker started");
 
   return {
     async close() {

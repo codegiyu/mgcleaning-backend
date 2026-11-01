@@ -1,13 +1,13 @@
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     restart: unless-stopped
     environment:
       POSTGRES_DB: mgcleaning
       POSTGRES_USER: ${SERVICE_USER_POSTGRES:?}
       POSTGRES_PASSWORD: ${SERVICE_PASSWORD_64_POSTGRES:?}
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql
     healthcheck:
       test:
         - CMD-SHELL
@@ -20,7 +20,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
     volumes:
       - redis-data:/data
     healthcheck:
@@ -47,12 +47,15 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    # The migrate service has already run; skip the image's migrate-then-start default.
+    command: ["node", "dist/server.js"]
     restart: unless-stopped
     expose:
-      - "4000"
+      - "4100"
     environment:
       NODE_ENV: production
-      API_PORT: "4000"
+      API_PORT: "4100"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:?}
       DATABASE_URL: postgresql://${SERVICE_USER_POSTGRES}:${SERVICE_PASSWORD_64_POSTGRES}@postgres:5432/mgcleaning
       REDIS_URL: redis://redis:6379
@@ -74,6 +77,15 @@ services:
       TURNSTILE_MODE: ${TURNSTILE_MODE:-off}
       TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
       TURNSTILE_TIMEOUT_MS: ${TURNSTILE_TIMEOUT_MS:-3000}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:?}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:?}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:?}
+      R2_BUCKET_NAME: ${R2_BUCKET_NAME:?}
+      R2_FOLDER_PREFIX: ${R2_FOLDER_PREFIX:?}
+      R2_PUBLIC_URL: ${R2_PUBLIC_URL:?}
+      MEDIA_MAX_UPLOAD_BYTES: ${MEDIA_MAX_UPLOAD_BYTES:-5242880}
+      REVALIDATE_SECRET: ${REVALIDATE_SECRET:?}
+      FRONTEND_REVALIDATE_URL: ${FRONTEND_REVALIDATE_URL:-}
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
     depends_on:
@@ -89,7 +101,7 @@ services:
         - node
         - -e
         - >-
-          fetch("http://127.0.0.1:4000/api/v1/health").then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))
+          fetch("http://127.0.0.1:4100/api/v1/health/ready").then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))
       interval: 30s
       timeout: 5s
       retries: 3
