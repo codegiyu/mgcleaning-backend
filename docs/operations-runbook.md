@@ -5,7 +5,7 @@ How to release, verify, back up, restore, and roll back the MG Cleaning stack (t
 ## Release checklist
 
 1. **Back up first.** Take an on-demand backup (see [Backups](#backups)) before any deploy that adds a migration.
-2. **Deploy the API stack.** Coolify builds the image, runs the one-shot `migrate` service, and starts `api` only after migrations succeed. A failed migration leaves the previous `api` container running.
+2. **Deploy the API.** Coolify builds the image; the new container applies migrations, then starts the API (in the Compose stack, the one-shot `migrate` service does this first). A failed migration leaves the previous container running.
 3. **Deploy the website** with the same build variables as before (`NEXT_PUBLIC_*` are inlined at build time).
 4. **Run the smoke test against staging twice in a row** (see below). Both runs must pass.
 5. **Promote to production** by deploying the same commits. Do not rebuild from a different commit than the one that passed staging.
@@ -57,7 +57,7 @@ M&G promises a reply to messages within 15 minutes, so the team alert has to rea
 - **`GET /api/v1/health`:** liveness only. The process is up.
 - **`GET /api/v1/health/ready`:** readiness. Postgres and Redis both answer within 2 seconds, otherwise it returns 503 naming the failed check (details go to the log). The image's `HEALTHCHECK` and the compose `api` health check use this endpoint, so an instance that loses its database or Redis is reported unhealthy.
 - **Crashes:** an unhandled error or rejection is logged at `fatal`, the API shuts down cleanly with exit code 1, and the orchestrator restarts it. If draining hangs for 15 seconds it exits anyway.
-- **Two builds of one image:** the `migrate` and `api` services each build the same image. With Docker's layer cache the second build is nearly free. They stay separate on purpose: a failed migration stops the deploy while the previous `api` container keeps serving.
+- **Migrations on start:** the image runs migrations before the API, so the Dockerfile deploy needs no separate step. The new container migrates while the old one still serves, which is why schema changes must stay compatible with the previous release (see [Rollback](#rollback)). In the Compose stack the `migrate` service builds the same image (nearly free with Docker's layer cache) and the `api` service skips migrating.
 
 ## Accounts
 

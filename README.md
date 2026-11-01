@@ -25,13 +25,19 @@ Mailpit is a local SMTP sink for development and automated tests: with `EMAIL_PR
 
 ## Docker and Coolify
 
-`Dockerfile` builds one production backend image used by the API process and the migration job. The API process starts both Hono and the BullMQ email worker, and the image runs as an unprivileged user. `db:migrate:runtime` applies the checked-in Drizzle SQL migrations from that image; `admin:bootstrap:runtime` creates the initial administrator from the bootstrap environment variables.
+`Dockerfile` builds one production backend image. The API process starts both Hono and the BullMQ email worker, and the image runs as an unprivileged user. On start it applies the checked-in Drizzle migrations (already-applied ones are skipped), then starts the API, so a failed migration stops the new container while the previous one keeps serving. `admin:bootstrap:runtime` creates the first owner from the bootstrap environment variables.
 
-Deploy the backend repository in Coolify as a **Git-based Docker Compose** application using `compose.coolify.yaml` (normal Compose mode, not Raw Compose). This stack contains PostgreSQL, Redis, a one-shot migration service, and the Hono API with its in-process BullMQ worker. Migrations must finish successfully before the API starts. PostgreSQL and Redis have persistent Docker volumes and no published host ports; configure independent PostgreSQL backups in Coolify or your backup system because a persistent volume alone is not a backup.
+**Recommended: Dockerfile application with Coolify-managed databases.**
+1. Create a PostgreSQL 18 and a Redis resource in Coolify, in the same project and network as the API.
+2. Set Redis's `maxmemory-policy` to `noeviction` in its custom configuration. BullMQ loses jobs if Redis evicts keys.
+3. Create a Dockerfile application from this repository. Set its port to `4100` (the container listens on `0.0.0.0:4100`) and assign the public API domain.
+4. Set `DATABASE_URL` and `REDIS_URL` to the resources' internal URLs, plus the variables below and `EMAIL_PROVIDER=resend`, the `R2_*` settings, and `NODE_ENV=production`.
 
-Assign the public API domain to the `api` service, including its internal port, for example `https://api.<your-domain>:4000`. Do not assign domains to `postgres`, `redis`, or `migrate`. The API listens on `0.0.0.0:4000` inside the container and has a Compose health check at `/api/v1/health`.
+The image's `HEALTHCHECK` calls `/api/v1/health/ready`, so the container reports unhealthy if it loses Postgres or Redis. Neither database needs a published host port. Configure PostgreSQL backups in Coolify; a volume alone is not a backup.
 
-Set these Compose variables in Coolify before deployment:
+**Alternative: everything in one Compose stack.** `compose.coolify.yaml` (Git-based Docker Compose, normal mode) runs PostgreSQL 18, Redis, a one-shot `migrate` service and the API. Assign the domain to the `api` service with its internal port (`https://api.<your-domain>:4100`), and none to the others.
+
+Set these variables in Coolify before deployment:
 
 - `FRONTEND_ORIGIN`: exact HTTPS origin of the website, with no path (for example, `https://www.<your-domain>`).
 - `RESEND_API_KEY`: API key from Resend, stored as a Coolify secret.
