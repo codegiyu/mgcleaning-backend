@@ -1,13 +1,13 @@
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     restart: unless-stopped
     environment:
       POSTGRES_DB: mgcleaning
       POSTGRES_USER: ${SERVICE_USER_POSTGRES:?}
       POSTGRES_PASSWORD: ${SERVICE_PASSWORD_64_POSTGRES:?}
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql
     healthcheck:
       test:
         - CMD-SHELL
@@ -47,12 +47,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    # The migrate service has already run; skip the image's migrate-then-start default.
+    command: ["node", "dist/server.js"]
     restart: unless-stopped
     expose:
-      - "4000"
+      - "4100"
     environment:
       NODE_ENV: production
-      API_PORT: "4000"
+      API_PORT: "4100"
       LOG_LEVEL: ${LOG_LEVEL:-info}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:?}
       DATABASE_URL: postgresql://${SERVICE_USER_POSTGRES}:${SERVICE_PASSWORD_64_POSTGRES}@postgres:5432/mgcleaning
@@ -99,7 +101,7 @@ services:
         - node
         - -e
         - >-
-          fetch("http://127.0.0.1:4000/api/v1/health/ready").then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))
+          fetch("http://127.0.0.1:4100/api/v1/health/ready").then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))
       interval: 30s
       timeout: 5s
       retries: 3
