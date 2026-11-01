@@ -49,6 +49,26 @@ M&G promises a reply to messages within 15 minutes, so the team alert has to rea
 - **When someone leaves:** deactivate their account (Users → Deactivate). Their sessions end at once, and the audit trail still names them.
 - **Owner locked out:** if every owner is locked out, an operator can reset a password with `admin:reset-password` inside the API container.
 
+## Data retention and deletion requests
+
+A retention pass (`src/maintenance/retention.ts`) runs at API start and then every six hours. It logs its counts when it changes anything:
+
+| Data | Kept for |
+|---|---|
+| Enquiries (with their notes and emails) | 24 months |
+| Sent or failed email copies | Bodies, recipients and buttons cleared after 90 days |
+| Audit events | 24 months |
+| Message-tap counts | 13 months |
+| Finished cache purges | 30 days |
+| Expired sessions | Removed |
+
+The privacy page states the same periods; change both together.
+
+When a customer asks for their details to be deleted:
+1. An owner opens the enquiry in **Admin → Inquiries** and uses **Delete enquiry**. The enquiry and its emails are removed at once.
+2. The activity log keeps the request reference as evidence.
+3. Backups age out on their own rotation (see Backups).
+
 ## Backups
 
 PostgreSQL holds every inquiry, article, audit event, and setting; the Docker volume alone is not a backup.
