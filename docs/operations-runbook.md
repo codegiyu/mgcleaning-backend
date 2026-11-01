@@ -11,6 +11,16 @@ How to release, verify, back up, restore, and roll back the MG Cleaning stack (t
 5. **Promote to production** by deploying the same commits. Do not rebuild from a different commit than the one that passed staging.
 6. After production deploys, check `GET /api/v1/health`, sign in to `/admin`, and confirm the overview shows no email or website-update failures.
 
+## Continuous integration
+
+Both repositories run `.github/workflows/ci.yml` on pushes to `main` and `staging` and on pull requests:
+- **API checks:** typecheck, unit tests, build, and a production dependency audit (high and critical advisories fail it).
+- **API integration:** Postgres and Redis service containers, running the integration suite.
+- **Website checks:** lint, typecheck, unit tests, build, and the same audit.
+- **Website end-to-end:** the API and website run together, with Playwright on top.
+
+The website's end-to-end job checks out this repository and needs a `BACKEND_REPO_TOKEN` secret with read access. Deploy only commits whose CI is green.
+
 ## Staging smoke test
 
 `src/scripts/smoke.ts` exercises the whole stack: health → inquiry (with attribution) → team (and optional customer) email delivery → admin sign-in and cookie attributes → R2 cover upload and verification → publish → public API and website page → unpublish and cache purge → sign-out revoked server-side. It refuses hosts that do not look like staging unless `SMOKE_ALLOW_PRODUCTION=yes`.
