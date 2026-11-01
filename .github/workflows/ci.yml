@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Typecheck, unit tests, build, audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      # Production dependencies must stay free of high and critical advisories.
+      - run: npm audit --omit=dev --audit-level=high
+
+  integration:
+    name: Integration tests (Postgres + Redis)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: mgcleaning_test
+          POSTGRES_USER: mgcleaning
+          POSTGRES_PASSWORD: mgcleaning-ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U mgcleaning -d mgcleaning_test"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      # The suite empties every table, so the database name must contain "test".
+      DATABASE_URL: postgres://mgcleaning:mgcleaning-ci@localhost:5432/mgcleaning_test
+      REDIS_URL: redis://localhost:6379
+      FRONTEND_ORIGIN: http://localhost:3000
+      INQUIRY_SECURITY_SECRET: ci-only-inquiry-security-secret-not-for-production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:integration
