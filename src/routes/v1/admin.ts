@@ -13,6 +13,7 @@ import { createMediaRouter } from "./media.js";
 import { createAccountRouter, type SessionActor } from "./account.js";
 import { createOperationsRouter } from "./operations.js";
 import { countReviews, createReviewsAdminRouter, type ReviewCounts } from "./reviews.js";
+import { summarizeChannelClicks, type ChannelClickSummary } from "../../events/channel-clicks.js";
 import { countRevalidations, notifyRevalidationQueued, queueRevalidation, revalidationForPostChange } from "../../cache/revalidation.js";
 import { hashPassword, verifyPassword } from "../../auth/password.js";
 import { allowLoginAttempt, clearLoginAttempts } from "../../auth/login-rate-limit.js";
@@ -71,6 +72,8 @@ export type AdminRouterDependencies = {
     emailOutboxCounts?: { pending: number; failed: number; deadLetter: number };
     cacheRevalidationCounts?: { pending: number; deadLetter: number };
     reviewCounts?: ReviewCounts;
+    /** Taps on WhatsApp, Instagram, and call links over the last 30 days. */
+    channelClicks?: ChannelClickSummary;
   }>;
   /** `source: "direct"` matches enquiries with no campaign source. */
   listInquiries: (query: PageQuery & { status: InquiryStatus | "all"; source?: string }) => Promise<{
@@ -320,6 +323,7 @@ function buildProductionDependencies(): AdminRouterDependencies {
         },
         cacheRevalidationCounts: await countRevalidations(),
         reviewCounts: await countReviews(),
+        channelClicks: await summarizeChannelClicks(),
       };
     },
     async listInquiries(query) {
