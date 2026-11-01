@@ -42,6 +42,13 @@ M&G promises a reply to messages within 15 minutes, so the team alert has to rea
 5. **Test it end to end:** run the smoke test (above) with the staging inbox, or send one real enquiry. Confirm on the officer's phone that the alert arrives, "Reply on WhatsApp" opens a chat with the customer, "Call" dials, and replying to the email addresses the customer.
 6. **If an alert does not arrive:** the inquiry record shows "Team alert: Failed/Dead letter", and the overview counts email failures. Check the Resend dashboard for the rejection reason. The worker retries failed sends with backoff before giving up.
 
+## Accounts
+
+- **First owner:** after the first deploy, create the first owner with `admin:bootstrap:runtime`, then remove the bootstrap variables.
+- **Everyone else:** add accounts from **Admin → Users**, staff by default. Pass the temporary password on privately; it is shown once and must be changed at first sign-in.
+- **When someone leaves:** deactivate their account (Users → Deactivate). Their sessions end at once, and the audit trail still names them.
+- **Owner locked out:** if every owner is locked out, an operator can reset a password with `admin:reset-password` inside the API container.
+
 ## Backups
 
 PostgreSQL holds every inquiry, article, audit event, and setting; the Docker volume alone is not a backup.

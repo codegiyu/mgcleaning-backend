@@ -66,6 +66,20 @@ Published articles are exposed at `GET /api/v1/blog` and `GET /api/v1/blog/:slug
 
 ## Admin account, activity, and settings
 
+- **Accounts and roles:** `admin_users.role` is `owner` or `staff`.
+  - **Staff** handle enquiries, reviews, the journal and media.
+  - **Owners** can also change site settings (`PATCH /admin/settings`) and manage accounts at `/api/v1/admin/users`: list, create with a role, change role, deactivate or reactivate, and reset a password. These routes return 403 for staff.
+  - **Temporary passwords:** a new or reset account gets a server-generated temporary password, returned once to the owner. Its `mustChangePassword` flag blocks every route except changing the password and signing out until it is replaced.
+  - **Deactivation:** deactivating an account revokes its sessions and blocks sign-in.
+  - **Owner safety:** owners can't change their own role or access, and the last active owner can't be removed.
+  - **First account:** `admin:bootstrap` creates the first account as an owner.
+- **Sign-in limits:** each attempt must pass three counters:
+  - 5 per 15 minutes per email and client address (a keyed IP hash);
+  - 20 per 15 minutes per address;
+  - 50 per hour per email.
+
+  Wrong guesses from one place therefore can't lock the real owner out from another.
+- **Password hashing:** hashes record their scrypt parameters (currently N=2^16, r=8, p=2). Older hashes are upgraded at the next successful sign-in.
 - **Password change:** `POST /api/v1/admin/account/password` with `{ currentPassword, newPassword }`. The new password must be 12–200 characters and different from the current one; attempts are rate-limited (5 per 15 minutes per account). On success every other session for the account is signed out, and the change is audited.
 - **Sessions:** `GET /api/v1/admin/account/sessions` lists the signed-in admin's active sessions (created, last used, browser) and marks the current one. `DELETE /api/v1/admin/account/sessions/:id` signs out one of the admin's own other sessions, and `POST /api/v1/admin/account/sessions/revoke-others` signs out all of them. Session IDs never reach the browser in the session check.
 - **Operator reset:** if an admin is locked out, set `ADMIN_RESET_EMAIL` and `ADMIN_RESET_PASSWORD` in the API container and run `node dist/scripts/resetAdminPassword.js` (`npm run admin:reset-password` locally). It sets the new password, revokes every session for that account, writes an audit event, and should be followed by removing the variables. The password is read from the environment rather than arguments so it does not appear in shell history or process lists. There is no emailed reset link by design.
