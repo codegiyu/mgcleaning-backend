@@ -19,8 +19,9 @@ async function main() {
     console.info(`Admin ${email} already exists; no changes were made.`);
     return;
   }
-  await getDb().insert(adminUsers).values({ email, passwordHash: await hashPassword(password) });
-  console.info(`Created initial admin account for ${email}. Remove the bootstrap password from the environment now.`);
+  // The first account is an owner: it can add staff and other owners from the dashboard.
+  await getDb().insert(adminUsers).values({ email, role: "owner", passwordHash: await hashPassword(password) });
+  console.info(`Created initial owner account for ${email}. Remove the bootstrap password from the environment now.`);
 }
 
 main()

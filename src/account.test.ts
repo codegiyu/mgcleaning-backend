@@ -6,7 +6,7 @@ import { createOperationsRouter, type OperationsRouterDependencies, type Setting
 import { effectiveNotificationEmail } from "./settings/site-settings.js";
 
 const token = "a-session-token-used-only-in-this-test";
-const actor = { id: "b48d4f5b-37e4-4f3b-bd0e-2ce9712dd4a5", email: "admin@example.test", sessionId: "c0ffee00-1d2e-4f3a-8b9c-0d1e2f3a4b5c" };
+const actor = { id: "b48d4f5b-37e4-4f3b-bd0e-2ce9712dd4a5", email: "admin@example.test", sessionId: "c0ffee00-1d2e-4f3a-8b9c-0d1e2f3a4b5c", role: "owner" as const, mustChangePassword: false };
 const otherSessionId = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
 const headers = { Cookie: `mg_admin_session=${token}`, Origin: "http://localhost:3000", "Content-Type": "application/json" };
 

@@ -1,5 +1,5 @@
 {
-  "id": "ad51e9b1-d9ac-4abc-84cd-d19f74260c49",
+  "id": "dfa2d6cb-b6bd-4246-a078-636ce7b759be",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -277,6 +277,26 @@
           "primaryKey": false,
           "notNull": true
         },
+        "role": {
+          "name": "role",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'staff'"
+        },
+        "must_change_password": {
+          "name": "must_change_password",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "deactivated_at": {
+          "name": "deactivated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "password_changed_at": {
           "name": "password_changed_at",
           "type": "timestamp with time zone",
@@ -304,7 +324,12 @@
         }
       },
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "admin_users_role": {
+          "name": "admin_users_role",
+          "value": "\"admin_users\".\"role\" IN ('owner', 'staff')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.blog_posts": {

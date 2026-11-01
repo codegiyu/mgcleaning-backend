@@ -9,8 +9,9 @@ import { getDb } from "../../db/client.js";
 import { adminSessions } from "../../db/schema/adminSessions.js";
 import { adminUsers } from "../../db/schema/adminUsers.js";
 import { forbiddenOrigin, trustedOrigin, uuidSchema } from "./admin-shared.js";
+import type { AdminRole } from "../../db/schema/adminUsers.js";
 
-export type SessionActor = { id: string; email: string; sessionId: string };
+export type SessionActor = { id: string; email: string; sessionId: string; role: AdminRole; mustChangePassword: boolean };
 type AccountVariables = { Variables: { admin: SessionActor } };
 
 export type SessionSummary = {
@@ -63,7 +64,7 @@ function buildProductionDependencies(): AccountRouterDependencies {
         // Compare-and-set on the old hash: a concurrent change (or CLI reset) wins and this one is refused.
         const updated = await tx
           .update(adminUsers)
-          .set({ passwordHash, passwordChangedAt: new Date() })
+          .set({ passwordHash, passwordChangedAt: new Date(), mustChangePassword: false })
           .where(and(eq(adminUsers.id, userId), eq(adminUsers.passwordHash, user.passwordHash)))
           .returning({ id: adminUsers.id });
         if (!updated.length) return { kind: "invalid-current" };

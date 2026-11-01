@@ -6,7 +6,7 @@ import {
   type AdminRouterDependencies,
 } from "./routes/v1/admin.js";
 
-const actor = { id: "b48d4f5b-37e4-4f3b-bd0e-2ce9712dd4a5", email: "admin@example.test" };
+const actor = { id: "b48d4f5b-37e4-4f3b-bd0e-2ce9712dd4a5", email: "admin@example.test", role: "owner" as const, mustChangePassword: false };
 const sessionActor = { ...actor, sessionId: "c0ffee00-1d2e-4f3a-8b9c-0d1e2f3a4b5c" };
 const token = "a-session-token-used-only-in-this-test";
 const postId = "01c47f57-ea8c-4583-aad4-9ec537f4ff41";

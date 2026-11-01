@@ -7,7 +7,7 @@ import { adminAuditEvents } from "../../db/schema/adminAuditEvents.js";
 import { adminUsers } from "../../db/schema/adminUsers.js";
 import { siteSettings } from "../../db/schema/siteSettings.js";
 import { effectiveNotificationEmail, readSiteSettings, SITE_SETTINGS_ID } from "../../settings/site-settings.js";
-import { forbiddenOrigin, pageResult, pageSchema, trustedOrigin, type PageQuery } from "./admin-shared.js";
+import { forbiddenOrigin, pageResult, pageSchema, requireOwner, trustedOrigin, type PageQuery } from "./admin-shared.js";
 
 type AdminVariables = { Variables: { admin: { id: string; email: string } } };
 
@@ -137,7 +137,7 @@ export function createOperationsRouter(dependencies: OperationsRouterDependencie
     return context.json({ success: true as const, message: "Settings loaded.", responseCode: 200, data });
   });
 
-  router.patch("/settings", async (context) => {
+  router.patch("/settings", requireOwner, async (context) => {
     if (!trustedOrigin(context)) return forbiddenOrigin(context);
     const parsed = settingsPatchSchema.safeParse(await context.req.json().catch(() => null));
     if (!parsed.success) {

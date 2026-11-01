@@ -140,7 +140,7 @@ describe("schedule route contract", () => {
 
   function router(updatePost: AdminRouterDependencies["updatePost"]) {
     return createAdminRouter({
-      async resolveSession(value: string) { return value === token ? { id: postId, email: "admin@example.test" } : null; },
+      async resolveSession(value: string) { return value === token ? { id: postId, email: "admin@example.test", sessionId: postId, role: "owner" as const, mustChangePassword: false } : null; },
       updatePost,
     } as unknown as AdminRouterDependencies); // Only session and update are exercised.
   }

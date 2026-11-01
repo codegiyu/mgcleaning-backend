@@ -6,7 +6,7 @@ import { createAdminRouter, type AdminRouterDependencies } from "./routes/v1/adm
 import { createMediaRouter, sanitizeFilename, type MediaRouterDependencies, type PendingAssetInput } from "./routes/v1/media.js";
 import { createR2Storage, MediaStorageUnavailableError, type MediaStorage, type StoredObject } from "./storage/r2.js";
 
-const actor = { id: "b48d4f5b-37e4-4f3b-bd0e-2ce9712dd4a5", email: "admin@example.test" };
+const actor = { id: "b48d4f5b-37e4-4f3b-bd0e-2ce9712dd4a5", email: "admin@example.test", role: "owner" as const, mustChangePassword: false };
 const token = "a-session-token-used-only-in-this-test";
 const assetId = "3f0d8a8e-2a4b-4c55-9d7e-6b1f2c3d4e5f";
 const now = new Date("2026-10-26T12:00:00.000Z");

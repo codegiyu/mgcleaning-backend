@@ -1,4 +1,4 @@
-import type { Context } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
 import { z } from "zod";
 import { env } from "../../env.js";
 
@@ -33,6 +33,15 @@ export function trustedOrigin(context: Context) {
   const origin = context.req.header("origin");
   return origin === env.FRONTEND_ORIGIN;
 }
+
+/** Account management and site settings are for owners; staff get 403. Runs after the session check. */
+export const requireOwner: MiddlewareHandler = async (context, next) => {
+  const admin = context.get("admin") as { role?: string } | undefined;
+  if (admin?.role !== "owner") {
+    return context.json({ success: false as const, message: "Only an owner can do this.", responseCode: 403 }, 403);
+  }
+  await next();
+};
 
 export function forbiddenOrigin(context: Context) {
   return context.json({ success: false as const, message: "Request origin is not allowed.", responseCode: 403 }, 403);

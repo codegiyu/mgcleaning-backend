@@ -28,6 +28,11 @@ export const auditActions = [
   "review.unpublish",
   "review.delete",
   "settings.update",
+  "user.create",
+  "user.role_change",
+  "user.deactivate",
+  "user.reactivate",
+  "user.password_reset",
 ] as const;
 export type AuditAction = (typeof auditActions)[number];
 

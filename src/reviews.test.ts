@@ -6,7 +6,7 @@ import { createAdminRouter, type AdminRouterDependencies } from "./routes/v1/adm
 import { createPublicReviewsRouter, createReviewsAdminRouter, type ReviewsRouterDependencies } from "./routes/v1/reviews.js";
 
 const token = "a-session-token-used-only-in-this-test";
-const actor = { id: "b48d4f5b-37e4-4f3b-bd0e-2ce9712dd4a5", email: "admin@example.test", sessionId: "c0ffee00-1d2e-4f3a-8b9c-0d1e2f3a4b5c" };
+const actor = { id: "b48d4f5b-37e4-4f3b-bd0e-2ce9712dd4a5", email: "admin@example.test", sessionId: "c0ffee00-1d2e-4f3a-8b9c-0d1e2f3a4b5c", role: "owner" as const, mustChangePassword: false };
 const headers = { Cookie: `mg_admin_session=${token}`, Origin: "http://localhost:3000", "Content-Type": "application/json" };
 const reviewId = "7d5f0a8e-2b9c-4c1d-9e8f-1a2b3c4d5e6f";
 const now = new Date("2026-10-27T09:00:00.000Z");

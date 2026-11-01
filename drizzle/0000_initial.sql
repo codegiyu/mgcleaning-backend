@@ -26,9 +26,13 @@ CREATE TABLE "admin_users" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"email" varchar(320) NOT NULL,
 	"password_hash" text NOT NULL,
+	"role" varchar(16) DEFAULT 'staff' NOT NULL,
+	"must_change_password" boolean DEFAULT false NOT NULL,
+	"deactivated_at" timestamp with time zone,
 	"password_changed_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "admin_users_email_unique" UNIQUE("email")
+	CONSTRAINT "admin_users_email_unique" UNIQUE("email"),
+	CONSTRAINT "admin_users_role" CHECK ("admin_users"."role" IN ('owner', 'staff'))
 );
 --> statement-breakpoint
 CREATE TABLE "blog_posts" (

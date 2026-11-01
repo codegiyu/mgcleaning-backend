@@ -13,9 +13,10 @@ import { createMediaRouter } from "./media.js";
 import { createAccountRouter, type SessionActor } from "./account.js";
 import { createOperationsRouter } from "./operations.js";
 import { countReviews, createReviewsAdminRouter, type ReviewCounts } from "./reviews.js";
+import { createUsersRouter } from "./users.js";
 import { summarizeChannelClicks, type ChannelClickSummary } from "../../events/channel-clicks.js";
 import { countRevalidations, notifyRevalidationQueued, queueRevalidation, revalidationForPostChange } from "../../cache/revalidation.js";
-import { hashPassword, verifyPassword } from "../../auth/password.js";
+import { DUMMY_PASSWORD_HASH, hashPassword, needsRehash, verifyPassword } from "../../auth/password.js";
 import { allowLoginAttempt, clearLoginAttempts } from "../../auth/login-rate-limit.js";
 import { getDb } from "../../db/client.js";
 import { adminSessions } from "../../db/schema/adminSessions.js";
@@ -24,12 +25,14 @@ import { blogPosts } from "../../db/schema/blogPosts.js";
 import { contactInquiries } from "../../db/schema/contactInquiries.js";
 import { emailOutbox } from "../../db/schema/emailOutbox.js";
 import { mediaAssets } from "../../db/schema/mediaAssets.js";
+import type { AdminRole } from "../../db/schema/adminUsers.js";
 
 const SESSION_COOKIE = "mg_admin_session";
 const SESSION_SECONDS = 60 * 60 * 12;
+/** Routes still open to an account that must change its password first. */
+const PASSWORD_CHANGE_ALLOWED = ["/auth/logout", "/account/password"];
 /** `last_used_at` is refreshed at most this often, so most requests stay read-only. */
 const SESSION_TOUCH_SECONDS = 5 * 60;
-const DUMMY_HASH = `scrypt$${"0".repeat(32)}$${"0".repeat(128)}`;
 
 export const inquiryStatuses = ["new", "contacted", "quoted", "booked", "closed"] as const;
 export type InquiryStatus = (typeof inquiryStatuses)[number];
@@ -38,7 +41,7 @@ export const postStatuses = ["draft", "scheduled", "published", "archived"] as c
 export const MAX_SCHEDULE_DAYS = 365;
 export type PostStatus = (typeof postStatuses)[number];
 
-export type AdminActor = { id: string; email: string };
+export type AdminActor = { id: string; email: string; role: AdminRole; mustChangePassword: boolean };
 type InquiryRecord = typeof contactInquiries.$inferSelect;
 type BlogPostRecord = typeof blogPosts.$inferSelect;
 export type LoginClient = { userAgent: string | null };
@@ -204,7 +207,8 @@ function digestToken(token: string) {
 }
 
 async function createDatabaseSession(email: string, password: string, audit: AuditContext, client: LoginClient): Promise<LoginResult> {
-  const permitted = await allowLoginAttempt(email);
+  const clientKey = audit.ipHash ?? "unknown";
+  const permitted = await allowLoginAttempt(email, clientKey);
   if (!permitted) return { kind: "rate-limited" };
 
   const normalizedEmail = email.toLowerCase();
@@ -213,8 +217,8 @@ async function createDatabaseSession(email: string, password: string, audit: Aud
     .from(adminUsers)
     .where(eq(adminUsers.email, normalizedEmail))
     .limit(1);
-  const passwordIsValid = await verifyPassword(password, user?.passwordHash ?? DUMMY_HASH);
-  if (!user || !passwordIsValid) {
+  const passwordIsValid = await verifyPassword(password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
+  if (!user || !passwordIsValid || user.deactivatedAt) {
     // Only failures against a real account are audited: the per-email rate limit
     // bounds those rows, whereas unknown-email attempts could be generated without limit.
     if (user) {
@@ -222,12 +226,20 @@ async function createDatabaseSession(email: string, password: string, audit: Aud
         action: "auth.login_failed",
         entityType: "admin_user",
         entityId: user.id,
-        metadata: { reason: "invalid_password" },
+        metadata: { reason: passwordIsValid ? "deactivated" : "invalid_password" },
       });
     }
     return { kind: "invalid" };
   }
-  await clearLoginAttempts(email);
+  await clearLoginAttempts(email, clientKey);
+  if (needsRehash(user.passwordHash)) {
+    // Upgrade to today's hashing cost while the password is in hand; compare-and-set so a
+    // concurrent password change is never overwritten.
+    await getDb()
+      .update(adminUsers)
+      .set({ passwordHash: await hashPassword(password) })
+      .where(and(eq(adminUsers.id, user.id), eq(adminUsers.passwordHash, user.passwordHash)));
+  }
 
   const token = randomBytes(32).toString("base64url");
   await getDb().transaction(async (tx) => {
@@ -245,18 +257,19 @@ async function createDatabaseSession(email: string, password: string, audit: Aud
     });
   });
 
-  return { kind: "success", actor: { id: user.id, email: user.email }, token };
+  return { kind: "success", actor: { id: user.id, email: user.email, role: user.role as AdminRole, mustChangePassword: user.mustChangePassword }, token };
 }
 
 async function resolveDatabaseSession(token: string): Promise<SessionActor | null> {
   const [session] = await getDb()
-    .select({ id: adminUsers.id, email: adminUsers.email, sessionId: adminSessions.id, lastUsedAt: adminSessions.lastUsedAt })
+    .select({ id: adminUsers.id, email: adminUsers.email, role: adminUsers.role, mustChangePassword: adminUsers.mustChangePassword, sessionId: adminSessions.id, lastUsedAt: adminSessions.lastUsedAt })
     .from(adminSessions)
     .innerJoin(adminUsers, eq(adminUsers.id, adminSessions.userId))
     .where(
       and(
         eq(adminSessions.tokenHash, digestToken(token)),
         gt(adminSessions.expiresAt, new Date()),
+        isNull(adminUsers.deactivatedAt),
       ),
     )
     .limit(1);
@@ -267,7 +280,7 @@ async function resolveDatabaseSession(token: string): Promise<SessionActor | nul
       .set({ lastUsedAt: sql`now()` })
       .where(and(eq(adminSessions.id, session.sessionId), lt(adminSessions.lastUsedAt, sql`now() - make_interval(secs => ${SESSION_TOUCH_SECONDS})`)));
   }
-  return { id: session.id, email: session.email, sessionId: session.sessionId };
+  return { id: session.id, email: session.email, sessionId: session.sessionId, role: session.role as AdminRole, mustChangePassword: session.mustChangePassword };
 }
 
 async function revokeDatabaseSession(token: string, audit: AuditContext) {
@@ -511,6 +524,7 @@ export function createAdminRouter(
   accountRouter = createAccountRouter(),
   operationsRouter = createOperationsRouter(),
   reviewsRouter = createReviewsAdminRouter(),
+  usersRouter = createUsersRouter(),
 ) {
   const router = new Hono<{ Variables: { admin: SessionActor } }>();
 
@@ -525,6 +539,10 @@ export function createAdminRouter(
       );
     }
     context.set("admin", actor);
+    // A new or reset account must choose its own password before doing anything else.
+    if (actor.mustChangePassword && !PASSWORD_CHANGE_ALLOWED.some((suffix) => context.req.path.endsWith(suffix))) {
+      return context.json({ success: false as const, message: "Choose a new password to continue.", responseCode: 403 }, 403);
+    }
     return next();
   });
 
@@ -565,7 +583,9 @@ export function createAdminRouter(
     const token = getCookie(context, SESSION_COOKIE);
     const actor = token ? await dependencies.resolveSession(token) : null;
     // The session ID stays server-side; the browser only needs to know who is signed in.
-    const data = actor ? { authenticated: true as const, user: { id: actor.id, email: actor.email } } : { authenticated: false as const, user: null };
+    const data = actor
+      ? { authenticated: true as const, user: { id: actor.id, email: actor.email, role: actor.role, mustChangePassword: actor.mustChangePassword } }
+      : { authenticated: false as const, user: null };
     return context.json({
       success: true as const,
       message: actor ? "Session is active." : "No active admin session.",
@@ -699,6 +719,7 @@ export function createAdminRouter(
   router.route("/media", mediaRouter);
   router.route("/account", accountRouter);
   router.route("/reviews", reviewsRouter);
+  router.route("/users", usersRouter);
   router.route("/", operationsRouter);
 
   return router;
