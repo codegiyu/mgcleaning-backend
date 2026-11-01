@@ -70,7 +70,7 @@ const reviewFields = {
   receivedOn: receivedOnSchema,
   featured: z.boolean().optional(),
   status: z.enum(reviewStatuses).optional(),
-  /** The editor confirms the customer agreed to the review and name appearing on the site. */
+  /** The editor confirms the customer agreed to the review and their full name appearing on the site. */
   consentConfirmed: z.boolean().optional(),
 };
 

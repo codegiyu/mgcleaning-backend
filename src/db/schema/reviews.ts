@@ -22,7 +22,7 @@ export const reviews = pgTable(
   "reviews",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    /** As shown publicly, e.g. "Amaka O." */
+    /** The customer's full name, shown publicly, e.g. "Amaka Okafor". */
     displayName: varchar("display_name", { length: 80 }).notNull(),
     /** Optional line under the name, e.g. "Homeowner, Wuse 2". */
     context: varchar("context", { length: 80 }),
