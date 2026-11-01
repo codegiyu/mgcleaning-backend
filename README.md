@@ -109,7 +109,7 @@ Logs are structured JSON (pino) with contact details and credentials redacted. E
 
 Release, smoke-test, backup, restore, and rollback procedures are in [`docs/operations-runbook.md`](docs/operations-runbook.md). Run the staging smoke test (`npm run smoke`, or `node dist/scripts/smoke.js` in the API container) twice before promoting a release, and run `scripts/restore-drill.sh` after setting up backups and then monthly. `GET /api/v1/admin/inquiries/:id` also returns each inquiry email's delivery status (`notifications`) without addresses or provider errors.
 
-Run `npm test`, `npm run typecheck`, and `npm run build` for checks. Generate a migration after schema changes with `npm run db:generate`, then review and apply it with `npm run db:migrate`. The schema starts from one migration, `drizzle/0000_initial.sql`, merged from the pre-launch history. Never edit or merge migrations once a database has applied them.
+Run `npm test`, `npm run typecheck`, and `npm run build` for checks. Generate a migration after schema changes with `npm run db:generate`, then review and apply it with `npm run db:migrate`. The schema starts from one migration, `drizzle/0000_initial.sql`, merged from the pre-launch history. Never edit or merge migrations once a database has applied them. Keep `npm audit --omit=dev` free of high and critical advisories. As of November 2026 the only remaining items are three moderate `glob`/`minimatch` advisories reached through `react-email`'s CLI tooling, which the email render path does not use (npm's suggested fix is a downgrade to `react-email` 1.x).
 
 Compose credentials and endpoints are for local development only. Configure database, Redis, and Resend credentials through deployment environment variables; do not commit `.env` files.
 
