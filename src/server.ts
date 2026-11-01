@@ -12,6 +12,7 @@ import { closeEmailQueue } from "./queue/email.queue.js";
 import { startEmailWorker } from "./queue/email.worker.js";
 import { closeInquiryAbuseRedis } from "./security/inquiry-abuse.js";
 import { closeLoginRateLimitRedis } from "./auth/login-rate-limit.js";
+import { closeChannelClickRedis } from "./events/channel-clicks.js";
 
 const emailWorker = startEmailWorker();
 const mediaMaintenance = startMediaMaintenance();
@@ -47,6 +48,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
         closeEmailQueue(),
         closeInquiryAbuseRedis(),
         closeLoginRateLimitRedis(),
+        closeChannelClickRedis(),
         closeDb(),
       ]).then((results) => {
         for (const result of results) {
