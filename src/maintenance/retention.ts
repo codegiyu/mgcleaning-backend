@@ -1,7 +1,8 @@
-import { and, inArray, lt, ne } from "drizzle-orm";
+import { and, inArray, isNotNull, lt, ne } from "drizzle-orm";
 import type { Logger } from "pino";
 import { getDb } from "../db/client.js";
 import { adminAuditEvents } from "../db/schema/adminAuditEvents.js";
+import { adminPasswordResets } from "../db/schema/adminPasswordResets.js";
 import { adminSessions } from "../db/schema/adminSessions.js";
 import { cacheRevalidations } from "../db/schema/cacheRevalidations.js";
 import { channelClicks } from "../db/schema/channelClicks.js";
@@ -33,6 +34,8 @@ export type RetentionCutoffs = {
   channelClicksBefore: Date;
   cacheRevalidationsBefore: Date;
   sessionsExpiredBefore: Date;
+  /** Used or expired reset links are kept a day for troubleshooting, then deleted. */
+  passwordResetsExpiredBefore: Date;
 };
 
 export function retentionCutoffs(now: Date): RetentionCutoffs {
@@ -44,6 +47,7 @@ export function retentionCutoffs(now: Date): RetentionCutoffs {
     channelClicksBefore: daysAgo(RETENTION.channelClicksDays),
     cacheRevalidationsBefore: daysAgo(RETENTION.cacheRevalidationsDays),
     sessionsExpiredBefore: now,
+    passwordResetsExpiredBefore: daysAgo(1),
   };
 }
 
@@ -55,6 +59,9 @@ export type RetentionDependencies = {
   deleteChannelClicks: (before: Date) => Promise<number>;
   deleteCacheRevalidations: (before: Date) => Promise<number>;
   deleteExpiredSessions: (before: Date) => Promise<number>;
+  deleteExpiredPasswordResets: (before: Date) => Promise<number>;
+  /** Password-reset email rows (their bodies are blanked once sent) after the email-body cutoff. */
+  deletePasswordResetEmails: (before: Date) => Promise<number>;
 };
 
 const productionDependencies: RetentionDependencies = {
@@ -90,6 +97,17 @@ const productionDependencies: RetentionDependencies = {
     const rows = await getDb().delete(adminSessions).where(lt(adminSessions.expiresAt, before)).returning({ id: adminSessions.id });
     return rows.length;
   },
+  async deleteExpiredPasswordResets(before) {
+    const rows = await getDb().delete(adminPasswordResets).where(lt(adminPasswordResets.expiresAt, before)).returning({ id: adminPasswordResets.id });
+    return rows.length;
+  },
+  async deletePasswordResetEmails(before) {
+    const rows = await getDb()
+      .delete(emailOutbox)
+      .where(and(isNotNull(emailOutbox.adminUserId), inArray(emailOutbox.status, ["sent", "dead_letter"]), lt(emailOutbox.createdAt, before)))
+      .returning({ id: emailOutbox.id });
+    return rows.length;
+  },
 };
 
 /**
@@ -106,6 +124,8 @@ export async function runRetention(now = new Date(), dependencies: RetentionDepe
     ["channelClicksDeleted", () => dependencies.deleteChannelClicks(cutoffs.channelClicksBefore)],
     ["cacheRevalidationsDeleted", () => dependencies.deleteCacheRevalidations(cutoffs.cacheRevalidationsBefore)],
     ["sessionsDeleted", () => dependencies.deleteExpiredSessions(cutoffs.sessionsExpiredBefore)],
+    ["passwordResetsDeleted", () => dependencies.deleteExpiredPasswordResets(cutoffs.passwordResetsExpiredBefore)],
+    ["passwordResetEmailsDeleted", () => dependencies.deletePasswordResetEmails(cutoffs.emailBodiesBefore)],
   ] as const;
   const counts: Record<string, number> = {};
   for (const [name, step] of steps) {

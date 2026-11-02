@@ -1,4 +1,6 @@
+import { sql } from "drizzle-orm";
 import {
+  check,
   index,
   integer,
   jsonb,
@@ -9,16 +11,18 @@ import {
   varchar,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { adminUsers } from "./adminUsers.js";
 import { contactInquiries } from "./contactInquiries.js";
 import type { EmailAction } from "../../emails/alert-actions.js";
 
+/** Emails waiting to be sent or already sent. Each belongs to an enquiry or, for password resets, an admin. */
 export const emailOutbox = pgTable(
   "email_outbox",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    inquiryId: uuid("inquiry_id")
-      .notNull()
-      .references(() => contactInquiries.id, { onDelete: "cascade" }),
+    inquiryId: uuid("inquiry_id").references(() => contactInquiries.id, { onDelete: "cascade" }),
+    adminUserId: uuid("admin_user_id").references(() => adminUsers.id, { onDelete: "cascade" }),
+    /** internal | customer (enquiries) or password_reset (admins). */
     kind: varchar("kind", { length: 24 }).notNull(),
     to: varchar("to_address", { length: 320 }).notNull(),
     subject: varchar("subject", { length: 240 }).notNull(),
@@ -43,8 +47,11 @@ export const emailOutbox = pgTable(
       .defaultNow(),
   },
   (table) => [
-    uniqueIndex("email_outbox_inquiry_kind_idx").on(table.inquiryId, table.kind),
+    // One row per inquiry, kind, and inbox: a team alert goes to every alert inbox.
+    uniqueIndex("email_outbox_inquiry_kind_to_idx").on(table.inquiryId, table.kind, table.to),
     index("email_outbox_status_available_at_idx").on(table.status, table.availableAt),
+    index("email_outbox_admin_user_id_idx").on(table.adminUserId),
+    check("email_outbox_one_owner", sql`(${table.inquiryId} IS NULL) <> (${table.adminUserId} IS NULL)`),
   ],
 );
 

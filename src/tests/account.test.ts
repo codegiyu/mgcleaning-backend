@@ -23,6 +23,7 @@ function app(account: Partial<AccountRouterDependencies> = {}, operations: Parti
     async listSessions() { return []; },
     async revokeSession() { return true; },
     async revokeOtherSessions() { return 1; },
+    async sendPasswordResetLink() { return "sent"; },
     ...account,
   };
   const operationsDependencies: OperationsRouterDependencies = {
@@ -182,5 +183,20 @@ describe("password policy", () => {
     expect(passwordPolicyError("x".repeat(11))).not.toBeNull();
     expect(passwordPolicyError("x".repeat(12))).toBeNull();
     expect(passwordPolicyError("x".repeat(201))).not.toBeNull();
+  });
+});
+
+describe("POST /account/password-reset-link", () => {
+  it("emails a reset link to the signed-in admin's own address", async () => {
+    const sendPasswordResetLink = vi.fn<AccountRouterDependencies["sendPasswordResetLink"]>(async () => "sent");
+    const response = await app({ sendPasswordResetLink }).request("/account/password-reset-link", { method: "POST", headers });
+    expect(response.status).toBe(200);
+    expect((await response.json()).message).toContain(actor.email);
+    expect(sendPasswordResetLink).toHaveBeenCalledWith(actor.email, expect.objectContaining({ actorId: actor.id }));
+  });
+
+  it("limits requests and refuses other origins", async () => {
+    expect((await app({ async sendPasswordResetLink() { return "rate-limited"; } }).request("/account/password-reset-link", { method: "POST", headers })).status).toBe(429);
+    expect((await app().request("/account/password-reset-link", { method: "POST", headers: { ...headers, Origin: "https://attacker.example" } })).status).toBe(403);
   });
 });

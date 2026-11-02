@@ -4,7 +4,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { app } from "../app.js";
 import { hashPassword } from "../auth/password.js";
 import { closeDb, getDb } from "../db/client.js";
-import { adminAuditEvents, adminUsers, cacheRevalidations, contactInquiries, emailOutbox, reviews } from "../db/schema/index.js";
+import { adminAuditEvents, adminPasswordResets, adminUsers, cacheRevalidations, contactInquiries, emailOutbox, reviews, siteSettings } from "../db/schema/index.js";
 import { runRetention } from "../maintenance/retention.js";
 import { sampleReviews, seedSampleReviews } from "../reviews/sample-reviews.js";
 
@@ -64,6 +64,53 @@ describe("an enquiry from the website", () => {
     expect(alert?.actions.map((action) => action.label)).toEqual(["Reply on WhatsApp", "Call", "Open in dashboard"]);
     expect(alert?.replyTo).toBe("ada@integration.test");
     expect(rows.some((row) => row.kind === "customer")).toBe(true);
+  });
+
+  it("stores one team alert per inbox when a Settings inbox is set as well", async () => {
+    await getDb().insert(siteSettings).values({ id: 1, inquiryNotificationEmail: "team@integration.test" }).onConflictDoUpdate({ target: siteSettings.id, set: { inquiryNotificationEmail: "team@integration.test" } });
+    try {
+      const response = await api("/inquiries", {
+        method: "POST",
+        headers: { "Idempotency-Key": randomUUID() },
+        body: JSON.stringify({ name: "Bola Integration", phone: "0816 771 5347", inquiryType: "contact", topic: "General question", message: "Testing alerts to two inboxes." }),
+      });
+      expect(response.status).toBe(201);
+      const { data } = await response.json();
+      const rows = await getDb().select().from(emailOutbox).where(eq(emailOutbox.inquiryId, data.inquiryId));
+      expect(rows.filter((row) => row.kind === "internal").map((row) => row.to).sort()).toEqual(["inquiries@example.com", "team@integration.test"].sort());
+    } finally {
+      await getDb().update(siteSettings).set({ inquiryNotificationEmail: null }).where(eq(siteSettings.id, 1));
+    }
+  });
+});
+
+describe("forgotten password", () => {
+  it("emails a single-use link that resets the password and signs out every session", async () => {
+    const owner = await ownerSession();
+    const unknown = await api("/admin/auth/password-reset/request", { method: "POST", body: JSON.stringify({ email: "nobody@integration.test" }) });
+    expect(unknown.status).toBe(200);
+    const requested = await api("/admin/auth/password-reset/request", { method: "POST", body: JSON.stringify({ email: ownerEmail }) });
+    expect(requested.status).toBe(200);
+    expect((await requested.json()).message).toBe((await unknown.json()).message);
+
+    const [user] = await getDb().select({ id: adminUsers.id }).from(adminUsers).where(eq(adminUsers.email, ownerEmail));
+    const emails = await getDb().select().from(emailOutbox).where(eq(emailOutbox.adminUserId, user!.id));
+    expect(emails).toHaveLength(1);
+    expect(emails[0]!.to).toBe(ownerEmail);
+    const resetToken = new URL(emails[0]!.actions[0]!.href).hash.replace("#token=", "");
+    const stored = await getDb().select().from(adminPasswordResets).where(eq(adminPasswordResets.userId, user!.id));
+    expect(stored.map((row) => row.tokenHash)).not.toContain(resetToken);
+
+    const newPassword = "a-new-integration-password";
+    const confirmed = await api("/admin/auth/password-reset/confirm", { method: "POST", body: JSON.stringify({ token: resetToken, newPassword }) });
+    expect(confirmed.status).toBe(200);
+    expect((await api("/admin/overview", { cookie: owner })).status).toBe(401);
+    expect((await signIn(ownerEmail, newPassword)).response.status).toBe(200);
+    const reused = await api("/admin/auth/password-reset/confirm", { method: "POST", body: JSON.stringify({ token: resetToken, newPassword: "another-new-password-1" }) });
+    expect(reused.status).toBe(400);
+
+    // Put the shared owner password back for the tests that follow.
+    await getDb().update(adminUsers).set({ passwordHash: await hashPassword(ownerPassword) }).where(eq(adminUsers.id, user!.id));
   });
 });
 

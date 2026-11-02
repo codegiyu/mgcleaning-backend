@@ -14,6 +14,7 @@ describe("retention cutoffs", () => {
     expect(cutoffs.channelClicksBefore.toISOString()).toBe(daysBefore(395));
     expect(cutoffs.cacheRevalidationsBefore.toISOString()).toBe(daysBefore(30));
     expect(cutoffs.sessionsExpiredBefore).toEqual(now);
+    expect(cutoffs.passwordResetsExpiredBefore.toISOString()).toBe(daysBefore(1));
     expect(RETENTION.inquiriesDays).toBe(730);
   });
 });
@@ -26,6 +27,8 @@ function fakeDependencies(overrides: Partial<RetentionDependencies> = {}): Reten
     deleteChannelClicks: vi.fn(async () => 1),
     deleteCacheRevalidations: vi.fn(async () => 3),
     deleteExpiredSessions: vi.fn(async () => 4),
+    deleteExpiredPasswordResets: vi.fn(async () => 6),
+    deletePasswordResetEmails: vi.fn(async () => 7),
     ...overrides,
   };
 }
@@ -34,9 +37,11 @@ describe("runRetention", () => {
   it("runs every step with its own cutoff and reports the counts", async () => {
     const dependencies = fakeDependencies();
     const counts = await runRetention(now, dependencies);
-    expect(counts).toEqual({ inquiriesDeleted: 2, emailBodiesScrubbed: 5, auditEventsDeleted: 0, channelClicksDeleted: 1, cacheRevalidationsDeleted: 3, sessionsDeleted: 4 });
+    expect(counts).toEqual({ inquiriesDeleted: 2, emailBodiesScrubbed: 5, auditEventsDeleted: 0, channelClicksDeleted: 1, cacheRevalidationsDeleted: 3, sessionsDeleted: 4, passwordResetsDeleted: 6, passwordResetEmailsDeleted: 7 });
     expect(dependencies.deleteInquiries).toHaveBeenCalledWith(new Date(daysBefore(730)));
     expect(dependencies.scrubEmailBodies).toHaveBeenCalledWith(new Date(daysBefore(90)));
+    expect(dependencies.deleteExpiredPasswordResets).toHaveBeenCalledWith(new Date(daysBefore(1)));
+    expect(dependencies.deletePasswordResetEmails).toHaveBeenCalledWith(new Date(daysBefore(90)));
   });
 
   it("keeps going when one step fails, and marks it", async () => {

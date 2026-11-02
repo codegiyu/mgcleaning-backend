@@ -5,7 +5,7 @@ const WINDOW_SECONDS = 15 * 60;
 const MAX_ATTEMPTS = 5;
 const connection = lazyProducerConnection();
 
-export type AttemptScope = "admin-login" | "admin-password-change";
+export type AttemptScope = "admin-login" | "admin-password-change" | "admin-password-reset";
 
 function counterKey(scope: AttemptScope, identifier: string) {
   const key = createHash("sha256").update(identifier.toLowerCase()).digest("hex");
@@ -59,5 +59,22 @@ export async function clearLoginAttempts(email: string, clientKey: string) {
   const redis = await connection.get();
   await redis.del(loginLimits(email, clientKey)[0].key);
 }
+
+/**
+ * Reset-link requests: 3 an hour for one email (so the inbox is not flooded) and 10 an hour
+ * from one address (against probing many emails). Counted whether or not the account exists.
+ */
+export function passwordResetRequestLimits(email: string, clientKey: string): AttemptLimit[] {
+  return [
+    { key: counterKey("admin-password-reset", `email:${email.trim().toLowerCase()}`), limit: 3, ttlSeconds: 60 * 60 },
+    { key: counterKey("admin-password-reset", `client:${clientKey}`), limit: 10, ttlSeconds: 60 * 60 },
+  ];
+}
+
+export const allowPasswordResetRequest = (email: string, clientKey: string) => consume(passwordResetRequestLimits(email, clientKey));
+
+/** Tries at using a reset link: 10 per 15 minutes from one address. */
+export const allowPasswordResetConfirm = (clientKey: string) =>
+  consume([{ key: counterKey("admin-password-reset", `confirm:${clientKey}`), limit: 10, ttlSeconds: 15 * 60 }]);
 
 export const closeLoginRateLimitRedis = () => connection.close();
