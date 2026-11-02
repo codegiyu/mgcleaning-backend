@@ -61,8 +61,9 @@ M&G promises a reply to messages within 15 minutes, so the team alert has to rea
 
 ## Accounts
 
-- **First owner:** after the first deploy, create the first owner with `admin:bootstrap:runtime`, then remove the bootstrap variables.
+- **First owners:** after the first deploy, create them with `admin:bootstrap:runtime`, then remove the bootstrap variables. `BOOTSTRAP_ADMIN_EMAIL` may hold several comma-separated addresses; each becomes an owner with `BOOTSTRAP_ADMIN_PASSWORD`, and with several addresses each must set their own password at first sign-in. Addresses that already have an account are skipped, so the command can be rerun to add more.
 - **Everyone else:** add accounts from **Admin → Users**, staff by default. Pass the temporary password on privately; it is shown once and must be changed at first sign-in.
+- **Hidden accounts:** addresses in `HIDDEN_ADMIN_EMAILS` (default `codegiyu@gmail.com`) do not appear in Users, cannot be changed or reset by other admins, and show as "Site administrator" in the activity log, except to that admin themselves. They still count as an active owner for the last-owner protection.
 - **When someone leaves:** deactivate their account (Users → Deactivate). Their sessions end at once, and the audit trail still names them.
 - **Owner locked out:** if every owner is locked out, an operator can reset a password with `admin:reset-password` inside the API container.
 

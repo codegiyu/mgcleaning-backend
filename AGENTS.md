@@ -8,6 +8,7 @@
 - Keep secrets in `.env`; update `.env.example` with variable names and safe local defaults only.
 - Do not add web app or React Query dependencies to this repository.
 - Account management and site settings are owner-only: guard new routes of that kind with `requireOwner` (`src/routes/v1/admin-shared.ts`).
+- Accounts listed in `HIDDEN_ADMIN_EMAILS` are invisible to other admins: any new route that lists or acts on admin users or shows actor emails must go through `isHiddenFrom` (`src/auth/hidden-admins.ts`).
 - Personal data has fixed retention (`src/maintenance/retention.ts`). Any new table holding personal data needs a retention rule there, and a matching line on the website's privacy page.
 - Production settings are validated in `parseEnv` (`src/env.ts`). Add new required production settings there, with a test in `src/env.test.ts`.
 - Until the first deploy, schema changes may be folded into `drizzle/0000_initial.sql` by regenerating it. After that, migrations are forward-only.
