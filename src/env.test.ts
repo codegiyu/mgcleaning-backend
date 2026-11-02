@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { parseEnv } from "./env.js";
+import { parseEnv, primaryFrontendOrigin } from "./env.js";
 
 /** A complete, valid production configuration; each test breaks one thing. */
 const production = {
   NODE_ENV: "production",
-  FRONTEND_ORIGIN: "https://mgcleaning.example.ng",
+  FRONTEND_ORIGINS: "https://mgcleaning.example.ng",
   DATABASE_URL: "postgresql://mg:secret@postgres:5432/mgcleaning",
   REDIS_URL: "redis://redis:6379",
   EMAIL_PROVIDER: "resend",
@@ -45,8 +45,9 @@ describe("parseEnv", () => {
     ["INQUIRY_SECURITY_SECRET", { INQUIRY_SECURITY_SECRET: "short-but-sixteen!!" }],
     ["EMAIL_FROM", { EMAIL_FROM: undefined }],
     ["INQUIRY_NOTIFICATION_TO", { INQUIRY_NOTIFICATION_TO: "inbox@example.org" }],
-    ["FRONTEND_ORIGIN", { FRONTEND_ORIGIN: "http://mgcleaning.example.ng" }],
-    ["FRONTEND_ORIGIN", { FRONTEND_ORIGIN: undefined }],
+    ["FRONTEND_ORIGINS", { FRONTEND_ORIGINS: "http://mgcleaning.example.ng" }],
+    ["FRONTEND_ORIGINS", { FRONTEND_ORIGINS: undefined }],
+    ["FRONTEND_ORIGINS", { FRONTEND_ORIGINS: "https://mgcleaning.example.ng,http://staging.example.ng" }],
     ["RESEND_API_KEY", { RESEND_API_KEY: undefined }],
     ["REVALIDATE_SECRET", { REVALIDATE_SECRET: undefined }],
   ])("refuses to start in production without a proper %s", (key, change) => {
@@ -61,5 +62,34 @@ describe("parseEnv", () => {
     expect(parseEnv({}).HIDDEN_ADMIN_EMAILS).toEqual(["codegiyu@gmail.com"]);
     expect(parseEnv({ HIDDEN_ADMIN_EMAILS: " A@x.test , b@x.test," }).HIDDEN_ADMIN_EMAILS).toEqual(["a@x.test", "b@x.test"]);
     expect(parseEnv({ HIDDEN_ADMIN_EMAILS: "" }).HIDDEN_ADMIN_EMAILS).toEqual([]);
+  });
+});
+
+describe("FRONTEND_ORIGINS", () => {
+  it("reads a comma-separated list, with the first entry as the primary website", () => {
+    const parsed = parseEnv({ FRONTEND_ORIGINS: " https://mgcleaning.example.ng , http://localhost:3000," });
+    expect(parsed.FRONTEND_ORIGINS).toEqual(["https://mgcleaning.example.ng", "http://localhost:3000"]);
+    expect(primaryFrontendOrigin(parsed)).toBe("https://mgcleaning.example.ng");
+  });
+
+  it("defaults to the local website", () => {
+    expect(parseEnv({}).FRONTEND_ORIGINS).toEqual(["http://localhost:3000"]);
+  });
+
+  it("still reads the old single FRONTEND_ORIGIN when FRONTEND_ORIGINS is unset", () => {
+    expect(parseEnv({ FRONTEND_ORIGIN: "https://old.example.ng" }).FRONTEND_ORIGINS).toEqual(["https://old.example.ng"]);
+    expect(parseEnv({ FRONTEND_ORIGIN: "https://old.example.ng", FRONTEND_ORIGINS: "https://new.example.ng" }).FRONTEND_ORIGINS).toEqual(["https://new.example.ng"]);
+  });
+
+  it.each(["https://mgcleaning.example.ng/", "https://mgcleaning.example.ng/admin", "not a url"])("refuses %s, which is not a bare origin", (origin) => {
+    expect(problems({ FRONTEND_ORIGINS: origin })).toContain("FRONTEND_ORIGINS");
+  });
+
+  it("allows local origins after the https primary in production", () => {
+    expect(problems({ ...production, FRONTEND_ORIGINS: "https://mgcleaning.example.ng,http://localhost:3000,http://127.0.0.1:3100" })).toEqual([]);
+  });
+
+  it("refuses a local origin as the production primary", () => {
+    expect(problems({ ...production, FRONTEND_ORIGINS: "http://localhost:3000,https://mgcleaning.example.ng" })).toContain("FRONTEND_ORIGINS");
   });
 });

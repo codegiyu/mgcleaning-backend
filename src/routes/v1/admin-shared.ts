@@ -28,10 +28,10 @@ export function parsePageQuery(context: Context) {
   });
 }
 
-/** Admin writes must come from the configured website origin (CSRF defence alongside SameSite=Lax). */
+/** Admin writes must come from a configured website origin (CSRF defence alongside SameSite=Lax). */
 export function trustedOrigin(context: Context) {
   const origin = context.req.header("origin");
-  return origin === env.FRONTEND_ORIGIN;
+  return origin !== undefined && env.FRONTEND_ORIGINS.includes(origin);
 }
 
 /** Account management and site settings are for owners; staff get 403. Runs after the session check. */
