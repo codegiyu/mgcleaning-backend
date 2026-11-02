@@ -24,7 +24,9 @@ app.use(
 app.use(
   "/api/*",
   cors({
-    origin: env.FRONTEND_ORIGIN,
+    // Echoes the request's Origin only when it is listed (and sends Vary: Origin), so each
+    // allowed website gets its own Access-Control-Allow-Origin and others get none.
+    origin: env.FRONTEND_ORIGINS,
     allowHeaders: ["Content-Type", "Authorization", "Idempotency-Key", REQUEST_ID_HEADER],
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     exposeHeaders: [REQUEST_ID_HEADER, "Retry-After"],
