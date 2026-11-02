@@ -51,6 +51,11 @@ const envSchema = z
     SMTP_USER: optionalString,
     SMTP_PASSWORD: optionalString,
     EMAIL_FROM: z.string().email().default("notifications@example.com"),
+    /** Sender name shown in inboxes; one line, no quotes or angle brackets. Blank means the default. */
+    EMAIL_FROM_NAME: z.preprocess(
+      (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+      z.string().trim().max(80).regex(/^[^"<>\\\r\n]+$/, "Use plain text without quotes, angle brackets, or line breaks.").default("M&G Cleaning Services"),
+    ),
     INQUIRY_NOTIFICATION_TO: z.string().email().default("inquiries@example.com"),
     INQUIRY_SECURITY_SECRET: z.string().min(16).default(DEV_INQUIRY_SECRET),
     TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(0),
