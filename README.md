@@ -42,7 +42,8 @@ Set these variables in Coolify before deployment:
 - `FRONTEND_ORIGINS`: the website origins allowed to call the API from a browser, comma-separated, each with no path or trailing slash. The first must be the live website's HTTPS origin (for example, `https://www.<your-domain>`): alert emails link to its dashboard, and cache purges go to it. Add more only when another site must call this API, for example `https://www.<your-domain>,http://localhost:3000` to run a local website against it. Every listed origin can send signed-in admin requests and real enquiries, so remove extras you no longer need. The old single `FRONTEND_ORIGIN` is still read when `FRONTEND_ORIGINS` is unset.
 - `RESEND_API_KEY`: API key from Resend, stored as a Coolify secret.
 - `EMAIL_FROM`: sender address on a domain verified with Resend.
-- `INQUIRY_NOTIFICATION_TO`: real inbox that should receive inquiry alerts.
+- `EMAIL_FROM_NAME` (optional): sender name shown in inboxes, `M&G Cleaning Services` by default. Emails come from `"<name>" <EMAIL_FROM>`. Plain text only: quotes, angle brackets, and line breaks are refused at startup.
+- `INQUIRY_NOTIFICATION_TO`: real inbox that always receives inquiry alerts. If an inbox is also set in Admin → Settings, both get every alert (once each, as separate emails).
 - `INQUIRY_SECURITY_SECRET`: random secret used to hash rate-limit and duplicate-detection identifiers.
 - `TRUST_PROXY_HOPS`: number of trusted reverse-proxy hops used to resolve visitor IPs; use `1` behind the documented Coolify proxy and keep it `0` for direct local requests. The client IP is read that many entries from the right of `X-Forwarded-For`, so client-supplied entries are ignored.
 - `LOG_LEVEL` (optional): pino log level, `info` by default.
@@ -102,7 +103,7 @@ Published articles are exposed at `GET /api/v1/blog` and `GET /api/v1/blog/:slug
   - Responses are 204. If Redis is down, the tap is dropped rather than stored unchecked.
   - Nothing that identifies a visitor is stored: no IP, user agent, or contact detail.
   - The admin overview's `channelClicks` reports the last 30 days by channel and top sources.
-- **Settings:** `GET`/`PATCH /api/v1/admin/settings` holds operational values only: the inquiry-alert inbox (falling back to `INQUIRY_NOTIFICATION_TO` when cleared) and the default author for new articles. New inquiries read the inbox inside their own transaction. Public business facts and claims stay in the web app's governed content files.
+- **Settings:** `GET`/`PATCH /api/v1/admin/settings` holds operational values only: an extra inquiry-alert inbox (alerts always go to `INQUIRY_NOTIFICATION_TO` as well; the response lists both as `notificationRecipients`) and the default author for new articles. New inquiries read the inbox inside their own transaction. Team alerts are titled "Booking form submission received" or "Contact form submission received". Public business facts and claims stay in the web app's governed content files.
 
 ## Scheduled publishing and website cache
 
