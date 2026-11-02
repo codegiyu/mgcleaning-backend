@@ -48,7 +48,8 @@ Set these variables in Coolify before deployment:
 - `LOG_LEVEL` (optional): pino log level, `info` by default.
 - `REVALIDATE_SECRET`: random 32+ character secret shared with the website's runtime `REVALIDATE_SECRET`, used to sign cache purges. Optionally set `FRONTEND_REVALIDATE_URL` if the website should be reached on an internal address.
 - `TURNSTILE_MODE` and `TURNSTILE_SECRET_KEY`: leave Turnstile off until abuse warrants it, then configure the server secret and the matching frontend site key.
-- `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD`: set only for the initial bootstrap.
+- `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD`: set only for the initial bootstrap. The email may list several addresses separated by commas; every new account is an owner with the one password, and when there are several, each person must choose their own at first sign-in.
+- `HIDDEN_ADMIN_EMAILS` (optional): comma-separated admin emails kept out of the Users list and the activity log's actor names, unless that admin is the one signed in. Default `codegiyu@gmail.com`; set it empty to hide nobody.
 
 After the first deployment and successful migrations, run `node dist/scripts/bootstrapAdmin.js` in the API container, then remove the two bootstrap variables and redeploy. The script is idempotent and will not reset an existing password. Keep the website and API on the same registrable domain so the existing `SameSite=Lax` HttpOnly session cookie works with credentialed cross-origin requests. The frontend origin must also match `FRONTEND_ORIGIN` exactly.
 
@@ -62,7 +63,7 @@ The public Next.js app is deployed separately from the `mgcleaning` repository a
 
 A request reference confirms receipt only; it does not confirm availability, pricing, or an appointment.
 
-The admin API includes session login/logout, an inquiry inbox with private status/notes, and blog draft/publish operations. Create the first admin after migrations: set `BOOTSTRAP_ADMIN_EMAIL` and a unique `BOOTSTRAP_ADMIN_PASSWORD` of at least 12 characters in `.env`, then run `npm run admin:bootstrap`. The command stores a scrypt password hash; remove the bootstrap password from `.env` after it succeeds. It will not reset an existing account. Sessions are random opaque values stored as hashes, expire after 12 hours, and are returned only in an HttpOnly cookie. Admin writes require the configured `FRONTEND_ORIGIN`.
+The admin API includes session login/logout, an inquiry inbox with private status/notes, and blog draft/publish operations. Create the first admin(s) after migrations: set `BOOTSTRAP_ADMIN_EMAIL` (one address, or several separated by commas) and a unique `BOOTSTRAP_ADMIN_PASSWORD` of at least 12 characters in `.env`, then run `npm run admin:bootstrap`. The command stores a scrypt password hash; remove the bootstrap password from `.env` after it succeeds. It will not reset an existing account. Sessions are random opaque values stored as hashes, expire after 12 hours, and are returned only in an HttpOnly cookie. Admin writes require the configured `FRONTEND_ORIGIN`.
 
 Published articles are exposed at `GET /api/v1/blog` and `GET /api/v1/blog/:slug`. Public reads only return published posts. Admin post content is plain text with limited headings, bold, and bullet-list conventions; raw HTML is not interpreted. Each article records an author name and optional related service slug. Publishing requires an author, related service, a verified cover upload, and cover-image alt text. Posts reference their cover by `coverMediaId`; the public cover URL is copied from the verified media asset on the server, and client-supplied cover URLs are rejected.
 

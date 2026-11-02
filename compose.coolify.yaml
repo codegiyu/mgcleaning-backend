@@ -88,6 +88,7 @@ services:
       FRONTEND_REVALIDATE_URL: ${FRONTEND_REVALIDATE_URL:-}
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      HIDDEN_ADMIN_EMAILS: ${HIDDEN_ADMIN_EMAILS-codegiyu@gmail.com}
     depends_on:
       postgres:
         condition: service_healthy

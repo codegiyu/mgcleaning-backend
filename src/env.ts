@@ -71,6 +71,11 @@ const envSchema = z
     REVALIDATE_SECRET: z.preprocess((value) => (value === "" ? undefined : value), z.string().min(32).optional()),
     /** Defaults to `${FRONTEND_ORIGIN}/api/revalidate`. */
     FRONTEND_REVALIDATE_URL: optionalUrl,
+    /** Comma-separated admin emails kept out of the Users list and activity log for everyone but themselves. */
+    HIDDEN_ADMIN_EMAILS: z
+      .string()
+      .default("codegiyu@gmail.com")
+      .transform((value) => value.split(",").map((entry) => entry.trim().toLowerCase()).filter(Boolean)),
     MEDIA_MAX_UPLOAD_BYTES: z.coerce.number().int().positive().max(20 * 1024 * 1024).default(5 * 1024 * 1024),
   })
   .superRefine((value, context) => {
