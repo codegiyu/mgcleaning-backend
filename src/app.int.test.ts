@@ -6,6 +6,7 @@ import { hashPassword } from "./auth/password.js";
 import { closeDb, getDb } from "./db/client.js";
 import { adminAuditEvents, adminUsers, cacheRevalidations, contactInquiries, emailOutbox, reviews } from "./db/schema/index.js";
 import { runRetention } from "./maintenance/retention.js";
+import { sampleReviews, seedSampleReviews } from "./reviews/sample-reviews.js";
 
 /**
  * The real app against real Postgres and Redis: queries, constraints, cascades, and the
@@ -117,6 +118,16 @@ describe("reviews", () => {
     await expect(
       getDb().insert(reviews).values({ displayName: "No Consent", quote: "This should never be stored as published.", source: "other", status: "published" }),
     ).rejects.toThrow();
+  });
+
+  it("seeds sample reviews only into an empty table, so restarts never add them again", async () => {
+    await getDb().delete(reviews);
+    expect((await seedSampleReviews()).inserted).toBe(sampleReviews.length);
+    expect((await seedSampleReviews()).inserted).toBe(0);
+    expect(await getDb().select().from(reviews)).toHaveLength(sampleReviews.length);
+
+    const publicList = await (await api("/reviews")).json();
+    expect(publicList.data.items).toHaveLength(sampleReviews.filter((sample) => sample.status === "published").length);
   });
 });
 
