@@ -135,7 +135,7 @@ Without the R2 variables, local development still runs; upload endpoints return 
 - the first `FRONTEND_ORIGINS` entry is `https://`, and any others are `https://` or `http://localhost` / `http://127.0.0.1`;
 - `RESEND_API_KEY` is set when `EMAIL_PROVIDER=resend`.
 
-The rules live in `parseEnv` (`src/env.ts`), with tests in `src/env.test.ts`.
+The rules live in `parseEnv` (`src/env.ts`), with tests in `src/tests/env.test.ts`.
 
 Logs are structured JSON (pino) with contact details and credentials redacted. Every response carries an `X-Request-Id` header (a well-formed incoming ID is reused), and each request log line includes it. Admin sign-ins, sign-outs, inquiry changes, and blog post changes are written to the append-only `admin_audit_events` table in the same transaction as the change; audit metadata records field names and status transitions, never contact details or note text, and IPs are stored only as keyed hashes.
 
