@@ -1,36 +1,15 @@
 import "dotenv/config";
 
-import { eq } from "drizzle-orm";
-import { parseBootstrapEmails } from "../auth/bootstrap-emails.js";
-import { hashPassword } from "../auth/password.js";
-import { passwordPolicyError } from "../auth/password-policy.js";
-import { closeDb, getDb } from "../db/client.js";
-import { adminUsers } from "../db/schema/adminUsers.js";
+import { bootstrapAdmins } from "../auth/bootstrap-admins.js";
+import { closeDb } from "../db/client.js";
 
+// The API also runs this on every start while the bootstrap variables are set; the script
+// remains for running it by hand.
 async function main() {
-  const emails = parseBootstrapEmails(process.env.BOOTSTRAP_ADMIN_EMAIL);
-  const password = process.env.BOOTSTRAP_ADMIN_PASSWORD;
-  if (!emails.length || !password) {
-    throw new Error("Set BOOTSTRAP_ADMIN_EMAIL (one address, or several separated by commas) and BOOTSTRAP_ADMIN_PASSWORD before bootstrapping admins.");
-  }
-  const policyError = passwordPolicyError(password);
-  if (policyError) throw new Error(`Initial admin password: ${policyError}`);
-  // One password is shared by every new account, so with several of them each person must
-  // choose their own at first sign-in. A single account keeps its password as set.
-  const mustChangePassword = emails.length > 1;
-  let created = 0;
-  for (const email of emails) {
-    const [existing] = await getDb().select({ id: adminUsers.id }).from(adminUsers).where(eq(adminUsers.email, email)).limit(1);
-    if (existing) {
-      console.info(`Admin ${email} already exists; no changes were made.`);
-      continue;
-    }
-    // Initial accounts are owners: they can add staff and other owners from the dashboard.
-    await getDb().insert(adminUsers).values({ email, role: "owner", passwordHash: await hashPassword(password), mustChangePassword });
-    created += 1;
-    console.info(`Created owner account for ${email}.`);
-  }
-  if (created) console.info("Remove the bootstrap password from the environment now.");
+  const { created, existing } = await bootstrapAdmins(process.env.BOOTSTRAP_ADMIN_EMAIL, process.env.BOOTSTRAP_ADMIN_PASSWORD);
+  for (const email of existing) console.info(`Admin ${email} already exists; no changes were made.`);
+  for (const email of created) console.info(`Created owner account for ${email}.`);
+  if (created.length) console.info("Remove the bootstrap password from the environment now.");
 }
 
 main()
