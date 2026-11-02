@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { RETENTION, retentionCutoffs, runRetention, type RetentionDependencies } from "./maintenance/retention.js";
-import { createAdminRouter, type AdminRouterDependencies } from "./routes/v1/admin.js";
+import { RETENTION, retentionCutoffs, runRetention, type RetentionDependencies } from "../maintenance/retention.js";
+import { createAdminRouter, type AdminRouterDependencies } from "../routes/v1/admin.js";
 
 const now = new Date("2026-11-01T12:00:00.000Z");
 const daysBefore = (days: number) => new Date(now.getTime() - days * 86_400_000).toISOString();

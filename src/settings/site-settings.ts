@@ -12,7 +12,11 @@ export async function readSiteSettings(executor: Selectable = getDb()): Promise<
   return row ?? null;
 }
 
-/** The admin-configured inbox wins; the deployment's INQUIRY_NOTIFICATION_TO remains the fallback. */
-export function effectiveNotificationEmail(settings: Pick<SiteSettings, "inquiryNotificationEmail"> | null) {
-  return settings?.inquiryNotificationEmail ?? env.INQUIRY_NOTIFICATION_TO;
+/**
+ * Every inbox that gets inquiry alerts: the one set in Admin → Settings, if any, and always
+ * the deployment's INQUIRY_NOTIFICATION_TO. An address listed twice is sent to once.
+ */
+export function notificationRecipients(settings: Pick<SiteSettings, "inquiryNotificationEmail"> | null, deploymentInbox = env.INQUIRY_NOTIFICATION_TO) {
+  const inboxes = [settings?.inquiryNotificationEmail, deploymentInbox].filter((inbox): inbox is string => Boolean(inbox));
+  return inboxes.filter((inbox, index) => inboxes.findIndex((other) => other.toLowerCase() === inbox.toLowerCase()) === index);
 }

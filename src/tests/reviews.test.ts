@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { revalidationForReviewChange } from "./cache/revalidation.js";
-import type { Review } from "./db/schema/reviews.js";
-import { planReviewWrite, reviewInputSchema, reviewPatchSchema, startOfWatYear, toPublicReview, watToday } from "./reviews/policy.js";
-import { createAdminRouter, type AdminRouterDependencies } from "./routes/v1/admin.js";
-import { createPublicReviewsRouter, createReviewsAdminRouter, type ReviewsRouterDependencies } from "./routes/v1/reviews.js";
+import { revalidationForReviewChange } from "../cache/revalidation.js";
+import type { Review } from "../db/schema/reviews.js";
+import { planReviewWrite, reviewInputSchema, reviewPatchSchema, startOfWatYear, toPublicReview, watToday } from "../reviews/policy.js";
+import { createAdminRouter, type AdminRouterDependencies } from "../routes/v1/admin.js";
+import { createPublicReviewsRouter, createReviewsAdminRouter, type ReviewsRouterDependencies } from "../routes/v1/reviews.js";
 
 const token = "a-session-token-used-only-in-this-test";
 const actor = { id: "b48d4f5b-37e4-4f3b-bd0e-2ce9712dd4a5", email: "admin@example.test", sessionId: "c0ffee00-1d2e-4f3a-8b9c-0d1e2f3a4b5c", role: "owner" as const, mustChangePassword: false };

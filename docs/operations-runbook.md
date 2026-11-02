@@ -46,7 +46,7 @@ Inside the API container use `node dist/scripts/smoke.js` with the same variable
 M&G promises a reply to messages within 15 minutes, so the team alert has to reach a phone quickly and reliably.
 
 1. **Verify the sender domain in Resend.** Add the SPF, DKIM, and (recommended) DMARC records Resend shows for the domain, and wait until Resend reports it verified. Without this, alerts are rejected or land in spam.
-2. **Set the API environment:** `EMAIL_PROVIDER=resend`, `RESEND_API_KEY` (a Coolify secret), and `EMAIL_FROM` on the verified domain (e.g. `notifications@<domain>`). Leave `INQUIRY_NOTIFICATION_TO` as the fallback inbox.
+2. **Set the API environment:** `EMAIL_PROVIDER=resend`, `RESEND_API_KEY` (a Coolify secret), and `EMAIL_FROM` on the verified domain (e.g. `notifications@<domain>`). The sender name defaults to `M&G Cleaning Services`; set `EMAIL_FROM_NAME` only to change it. `INQUIRY_NOTIFICATION_TO` always receives every alert, as well as any inbox set in step 3.
 3. **Set the alert inbox in the dashboard.** In Admin → Settings, enter the inbox the customer experience officer reads on their phone. It takes effect for the next enquiry without a redeploy.
 4. **Check `FRONTEND_ORIGINS`.** Its first entry must be the public website origin. The alert's "Open in dashboard" button links to `<first entry>/admin/inquiries/<id>`.
 5. **Test it end to end:** run the smoke test (above) with the staging inbox, or send one real enquiry. Confirm on the officer's phone that the alert arrives, "Reply on WhatsApp" opens a chat with the customer, "Call" dials, and replying to the email addresses the customer.

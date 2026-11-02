@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { actionsAsText, buildAlertActions, isSafeActionHref, nigerianWhatsAppNumber, plainTextBody } from "./emails/alert-actions.js";
+import { actionsAsText, buildAlertActions, isSafeActionHref, nigerianWhatsAppNumber, plainTextBody } from "../emails/alert-actions.js";
 
 const inquiry = { id: "3c2d57bc-11af-4c75-8b81-03a676cc1f55", reference: "MG-20261027-A1B2C3", phone: "0816 771 5346" };
 const origin = "https://mgcleaning.example";

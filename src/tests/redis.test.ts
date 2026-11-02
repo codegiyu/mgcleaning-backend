@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { Redis } from "ioredis";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { lazyProducerConnection, whenRedisReady } from "./queue/redis.js";
+import { lazyProducerConnection, whenRedisReady } from "../queue/redis.js";
 
 /** Stands in for an ioredis client: a status plus the connection events. */
 class FakeClient extends EventEmitter {

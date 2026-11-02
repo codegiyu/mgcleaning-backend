@@ -11,11 +11,13 @@ import { getDb } from "../db/client.js";
 import { emailOutbox } from "../db/schema/emailOutbox.js";
 import { NotificationEmail } from "../emails/notification.js";
 import { plainTextBody } from "../emails/alert-actions.js";
+import { emailSender } from "../emails/sender.js";
 import { enqueueEmail, EMAIL_QUEUE_NAME, type OutboundEmailJob } from "./email.queue.js";
 import { createWorkerRedisConnection } from "./redis.js";
 
 export function startEmailWorker() {
   const logger = rootLogger.child({ component: "email-worker" });
+  const sender = emailSender(env.EMAIL_FROM, env.EMAIL_FROM_NAME);
   const resend =
     env.EMAIL_PROVIDER === "resend"
       ? (() => {
@@ -75,7 +77,7 @@ export function startEmailWorker() {
         const text = plainTextBody(outbox.message, outbox.actions);
         if (resend) {
           const { error } = await resend.emails.send({
-            from: env.EMAIL_FROM,
+            from: sender,
             to: outbox.to,
             subject: outbox.subject,
             text,
@@ -87,7 +89,7 @@ export function startEmailWorker() {
           }
         } else {
           await transporter!.sendMail({
-            from: env.EMAIL_FROM,
+            from: sender,
             to: outbox.to,
             subject: outbox.subject,
             text,

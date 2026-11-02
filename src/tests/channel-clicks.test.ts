@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { MAX_CLICK_BODY_BYTES, parseChannelClick } from "./events/channel-clicks.js";
-import { createEventsRouter, type EventsRouterDependencies } from "./routes/v1/events.js";
+import { MAX_CLICK_BODY_BYTES, parseChannelClick } from "../events/channel-clicks.js";
+import { createEventsRouter, type EventsRouterDependencies } from "../routes/v1/events.js";
 
 const origin = "http://localhost:3000";
 

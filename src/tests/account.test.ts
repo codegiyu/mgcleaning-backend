@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { passwordPolicyError } from "./auth/password-policy.js";
-import { createAccountRouter, type AccountRouterDependencies } from "./routes/v1/account.js";
-import { createAdminRouter, type AdminRouterDependencies } from "./routes/v1/admin.js";
-import { createOperationsRouter, type OperationsRouterDependencies, type SettingsView } from "./routes/v1/operations.js";
-import { effectiveNotificationEmail } from "./settings/site-settings.js";
+import { passwordPolicyError } from "../auth/password-policy.js";
+import { createAccountRouter, type AccountRouterDependencies } from "../routes/v1/account.js";
+import { createAdminRouter, type AdminRouterDependencies } from "../routes/v1/admin.js";
+import { createOperationsRouter, type OperationsRouterDependencies, type SettingsView } from "../routes/v1/operations.js";
+import { notificationRecipients } from "../settings/site-settings.js";
 
 const token = "a-session-token-used-only-in-this-test";
 const actor = { id: "b48d4f5b-37e4-4f3b-bd0e-2ce9712dd4a5", email: "admin@example.test", sessionId: "c0ffee00-1d2e-4f3a-8b9c-0d1e2f3a4b5c", role: "owner" as const, mustChangePassword: false };
@@ -12,7 +12,7 @@ const headers = { Cookie: `mg_admin_session=${token}`, Origin: "http://localhost
 
 const settings: SettingsView = {
   inquiryNotificationEmail: null,
-  effectiveNotificationEmail: "inquiries@example.com",
+  notificationRecipients: ["inquiries@example.com"],
   defaultAuthorName: null,
   updatedAt: null,
 };
@@ -167,12 +167,13 @@ describe("site settings", () => {
     expect(updateSettings).not.toHaveBeenCalled();
   });
 
-  it("allows clearing the inbox back to the deployment default", async () => {
+  it("allows clearing the inbox, leaving only the deployment inbox", async () => {
     const updateSettings = vi.fn<OperationsRouterDependencies["updateSettings"]>(async (patch) => ({ ...settings, ...patch }));
     await app({}, { updateSettings }).request("/settings", { method: "PATCH", headers, body: JSON.stringify({ inquiryNotificationEmail: null }) });
     expect(updateSettings.mock.calls[0]?.[0]).toEqual({ inquiryNotificationEmail: null });
-    expect(effectiveNotificationEmail({ inquiryNotificationEmail: null })).toBe("inquiries@example.com");
-    expect(effectiveNotificationEmail({ inquiryNotificationEmail: "team@example.com" })).toBe("team@example.com");
+    expect(notificationRecipients({ inquiryNotificationEmail: null }, "inquiries@example.com")).toEqual(["inquiries@example.com"]);
+    expect(notificationRecipients({ inquiryNotificationEmail: "team@example.com" }, "inquiries@example.com")).toEqual(["team@example.com", "inquiries@example.com"]);
+    expect(notificationRecipients({ inquiryNotificationEmail: "Inquiries@Example.com" }, "inquiries@example.com")).toEqual(["Inquiries@Example.com"]);
   });
 });
 

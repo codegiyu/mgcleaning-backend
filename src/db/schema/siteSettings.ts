@@ -10,7 +10,7 @@ export const siteSettings = pgTable(
   "site_settings",
   {
     id: smallint("id").primaryKey().default(1),
-    /** Inbox for new-inquiry alerts; null falls back to INQUIRY_NOTIFICATION_TO. */
+    /** Extra inbox for new-inquiry alerts, alongside INQUIRY_NOTIFICATION_TO, which always gets them. */
     inquiryNotificationEmail: varchar("inquiry_notification_email", { length: 320 }),
     /** Pre-filled author on new articles. */
     defaultAuthorName: varchar("default_author_name", { length: 120 }),

@@ -1,11 +1,11 @@
 import { Writable } from "node:stream";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
-import { changedFields, hashAuditIp } from "./audit/audit.js";
-import { isUniqueViolation } from "./db/errors.js";
-import { createLogger } from "./logger.js";
-import { requestContext, type RequestContextVariables } from "./request-context.js";
-import { clientIpFromForwardedFor } from "./security/inquiry-abuse.js";
+import { changedFields, hashAuditIp } from "../audit/audit.js";
+import { isUniqueViolation } from "../db/errors.js";
+import { createLogger } from "../logger.js";
+import { requestContext, type RequestContextVariables } from "../request-context.js";
+import { clientIpFromForwardedFor } from "../security/inquiry-abuse.js";
 
 function captureLogger() {
   const lines: string[] = [];

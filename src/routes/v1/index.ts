@@ -7,7 +7,7 @@ import type { Context } from "hono";
 import { env, primaryFrontendOrigin } from "../../env.js";
 import { logger } from "../../logger.js";
 import { getRequestLogger } from "../../request-context.js";
-import { effectiveNotificationEmail, readSiteSettings } from "../../settings/site-settings.js";
+import { notificationRecipients, readSiteSettings } from "../../settings/site-settings.js";
 import { getDb } from "../../db/client.js";
 import { contactInquiries } from "../../db/schema/contactInquiries.js";
 import { emailOutbox, type NewEmailOutbox } from "../../db/schema/emailOutbox.js";
@@ -176,7 +176,7 @@ function contactMethodLabel(value?: string) {
 export function createEmailOutboxRows(
   input: ParsedInquiry,
   inquiry: { id: string; reference: string },
-  recipient: string,
+  recipients: string[],
   adminOrigin: string = primaryFrontendOrigin(env),
 ): NewEmailOutbox[] {
   const actions = buildAlertActions({ id: inquiry.id, reference: inquiry.reference, phone: input.phone, preferredContactMethod: input.preferredContactMethod }, adminOrigin);
@@ -208,24 +208,23 @@ export function createEmailOutboxRows(
     "",
     `For the fastest reply, message us on WhatsApp using the number on our website. ${MESSAGE_RESPONSE_EXPECTATION}.`,
   ].join("\n");
-  const rows: NewEmailOutbox[] = [
-    {
-      inquiryId: inquiry.id,
-      kind: "internal",
-      to: recipient,
-      subject: `New M&G Cleaning Services ${input.inquiryType === "booking" ? "cleaning request" : "contact message"} · ${inquiry.reference}`,
-      title: input.inquiryType === "booking" ? "New cleaning request" : "New contact message",
-      message: details.join("\n\n"),
-      actions,
-      replyTo: input.email ?? null,
-    },
-  ];
+  // One team alert per inbox, so each has its own delivery status and retries.
+  const rows: NewEmailOutbox[] = recipients.map((recipient) => ({
+    inquiryId: inquiry.id,
+    kind: "internal",
+    to: recipient,
+    subject: input.inquiryType === "booking" ? "Booking form submission received" : "Contact form submission received",
+    title: input.inquiryType === "booking" ? "New cleaning request" : "New contact message",
+    message: details.join("\n\n"),
+    actions,
+    replyTo: input.email ?? null,
+  }));
   if (input.email) {
     rows.push({
       inquiryId: inquiry.id,
       kind: "customer",
       to: input.email,
-      subject: `M&G Cleaning Services request received · ${inquiry.reference}`,
+      subject: `Request received · ${inquiry.reference}`,
       title: "Your cleaning request has been received",
       message: customerMessage,
     });
@@ -297,8 +296,8 @@ const productionDependencies: InquiryRouterDependencies = {
         return saved;
       }
 
-      // Read inside the transaction so the alert goes to the inbox configured when the inquiry was saved.
-      const rows = createEmailOutboxRows(input, inquiry, effectiveNotificationEmail(await readSiteSettings(tx)));
+      // Read inside the transaction so alerts go to the inboxes configured when the inquiry was saved.
+      const rows = createEmailOutboxRows(input, inquiry, notificationRecipients(await readSiteSettings(tx)));
       const outbox = await tx
         .insert(emailOutbox)
         .values(rows)
