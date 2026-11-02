@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseEnv, primaryFrontendOrigin } from "./env.js";
+import { parseEnv, primaryFrontendOrigin } from "../env.js";
 
 /** A complete, valid production configuration; each test breaks one thing. */
 const production = {

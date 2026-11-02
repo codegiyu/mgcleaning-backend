@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import { app } from "./app.js";
-import { hashPassword } from "./auth/password.js";
-import { closeDb, getDb } from "./db/client.js";
-import { adminAuditEvents, adminUsers, cacheRevalidations, contactInquiries, emailOutbox, reviews } from "./db/schema/index.js";
-import { runRetention } from "./maintenance/retention.js";
-import { sampleReviews, seedSampleReviews } from "./reviews/sample-reviews.js";
+import { app } from "../app.js";
+import { hashPassword } from "../auth/password.js";
+import { closeDb, getDb } from "../db/client.js";
+import { adminAuditEvents, adminUsers, cacheRevalidations, contactInquiries, emailOutbox, reviews } from "../db/schema/index.js";
+import { runRetention } from "../maintenance/retention.js";
+import { sampleReviews, seedSampleReviews } from "../reviews/sample-reviews.js";
 
 /**
  * The real app against real Postgres and Redis: queries, constraints, cascades, and the

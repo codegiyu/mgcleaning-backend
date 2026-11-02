@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import type { MediaAsset } from "./db/schema/mediaAssets.js";
-import { runMediaMaintenance } from "./media/maintenance.js";
-import { buildMediaKey, matchesImageSignature, resolveImageUpload } from "./media/policy.js";
-import { createAdminRouter, type AdminRouterDependencies } from "./routes/v1/admin.js";
-import { createMediaRouter, sanitizeFilename, type MediaRouterDependencies, type PendingAssetInput } from "./routes/v1/media.js";
-import { createR2Storage, MediaStorageUnavailableError, type MediaStorage, type StoredObject } from "./storage/r2.js";
+import type { MediaAsset } from "../db/schema/mediaAssets.js";
+import { runMediaMaintenance } from "../media/maintenance.js";
+import { buildMediaKey, matchesImageSignature, resolveImageUpload } from "../media/policy.js";
+import { createAdminRouter, type AdminRouterDependencies } from "../routes/v1/admin.js";
+import { createMediaRouter, sanitizeFilename, type MediaRouterDependencies, type PendingAssetInput } from "../routes/v1/media.js";
+import { createR2Storage, MediaStorageUnavailableError, type MediaStorage, type StoredObject } from "../storage/r2.js";
 
 const actor = { id: "b48d4f5b-37e4-4f3b-bd0e-2ce9712dd4a5", email: "admin@example.test", role: "owner" as const, mustChangePassword: false };
 const token = "a-session-token-used-only-in-this-test";

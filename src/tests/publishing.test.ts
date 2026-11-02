@@ -6,8 +6,8 @@ import {
   revalidationForPostChange,
   sendRevalidation,
   signRevalidation,
-} from "./cache/revalidation.js";
-import { createAdminRouter, planPostPatch, type AdminRouterDependencies } from "./routes/v1/admin.js";
+} from "../cache/revalidation.js";
+import { createAdminRouter, planPostPatch, type AdminRouterDependencies } from "../routes/v1/admin.js";
 
 const now = new Date("2026-10-27T09:00:00.000Z");
 const coverId = "7d1a0c52-4b5e-4f4a-9a4f-2f6f8f0b1c11";

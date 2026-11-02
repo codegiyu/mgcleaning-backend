@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { FORM_RESPONSE_EXPECTATION, MESSAGE_RESPONSE_EXPECTATION } from "./emails/response-expectation.js";
-import { plainTextBody } from "./emails/alert-actions.js";
-import { createEmailOutboxRows, createV1Router, type InquiryRouterDependencies, type ParsedInquiry } from "./routes/v1/index.js";
+import { FORM_RESPONSE_EXPECTATION, MESSAGE_RESPONSE_EXPECTATION } from "../emails/response-expectation.js";
+import { plainTextBody } from "../emails/alert-actions.js";
+import { createEmailOutboxRows, createV1Router, type InquiryRouterDependencies, type ParsedInquiry } from "../routes/v1/index.js";
 
 const inquiry = { id: "3c2d57bc-11af-4c75-8b81-03a676cc1f55", reference: "MG-20261027-A1B2C3" };
 

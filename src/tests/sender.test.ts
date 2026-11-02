@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { emailSender } from "./emails/sender.js";
-import { parseEnv } from "./env.js";
+import { emailSender } from "../emails/sender.js";
+import { parseEnv } from "../env.js";
 
 describe("email sender", () => {
   it("quotes the sender name in front of the address", () => {

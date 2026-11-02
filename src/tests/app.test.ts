@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { app } from "./app.js";
+import { app } from "../app.js";
 import {
   createV1Router,
   type CreateInquiryInput,
   type InquiryRouterDependencies,
   type SavedInquiry,
-} from "./routes/v1/index.js";
-import type { OutboundEmailJob } from "./queue/email.queue.js";
+} from "../routes/v1/index.js";
+import type { OutboundEmailJob } from "../queue/email.queue.js";
 
 const validInquiry: CreateInquiryInput = {
   name: "Mary Example",

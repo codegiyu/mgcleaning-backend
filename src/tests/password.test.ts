@@ -1,6 +1,6 @@
 import { randomBytes, scryptSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { DUMMY_PASSWORD_HASH, hashPassword, needsRehash, SCRYPT_PARAMS, verifyPassword } from "./auth/password.js";
+import { DUMMY_PASSWORD_HASH, hashPassword, needsRehash, SCRYPT_PARAMS, verifyPassword } from "../auth/password.js";
 
 /** A hash in the original `scrypt$salt$key` format with Node's default parameters. */
 function legacyHash(password: string) {

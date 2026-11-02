@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { describeAttribution, normalizeAttributionValue, normalizeLandingPath } from "./attribution.js";
-import { createAdminRouter, type AdminRouterDependencies } from "./routes/v1/admin.js";
-import { createV1Router, type InquiryRouterDependencies, type ParsedInquiry } from "./routes/v1/index.js";
+import { describeAttribution, normalizeAttributionValue, normalizeLandingPath } from "../attribution.js";
+import { createAdminRouter, type AdminRouterDependencies } from "../routes/v1/admin.js";
+import { createV1Router, type InquiryRouterDependencies, type ParsedInquiry } from "../routes/v1/index.js";
 
 const contactInquiry = {
   name: "Mary Example",

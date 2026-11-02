@@ -1,6 +1,6 @@
 import { render } from "react-email";
 import { describe, expect, it } from "vitest";
-import { NotificationEmail } from "./emails/notification.js";
+import { NotificationEmail } from "../emails/notification.js";
 
 describe("NotificationEmail", () => {
   it("renders the actions as buttons above the details", async () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { parseEnv } from "./env.js";
-import { reviewInputSchema, watToday } from "./reviews/policy.js";
-import { SAMPLE_CONTEXT_PREFIX, sampleReviewRows, sampleReviews } from "./reviews/sample-reviews.js";
+import { parseEnv } from "../env.js";
+import { reviewInputSchema, watToday } from "../reviews/policy.js";
+import { SAMPLE_CONTEXT_PREFIX, sampleReviewRows, sampleReviews } from "../reviews/sample-reviews.js";
 
 const now = new Date("2026-11-02T09:00:00.000Z");
 

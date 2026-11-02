@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { app } from "./app.js";
-import { createReadinessRouter } from "./routes/v1/readiness.js";
+import { app } from "../app.js";
+import { createReadinessRouter } from "../routes/v1/readiness.js";
 
 const ok = async () => {};
 const down = async () => { throw new Error("connection refused"); };

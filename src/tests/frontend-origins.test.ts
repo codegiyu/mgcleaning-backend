@@ -5,11 +5,11 @@ const local = "http://localhost:3000";
 const stranger = "https://elsewhere.example.ng";
 
 // The env module is parsed on import, so set the list before loading the app.
-let app: (typeof import("./app.js"))["app"];
+let app: (typeof import("../app.js"))["app"];
 beforeAll(async () => {
   vi.stubEnv("FRONTEND_ORIGINS", `${primary},${local}`);
   vi.resetModules();
-  ({ app } = await import("./app.js"));
+  ({ app } = await import("../app.js"));
 });
 
 function preflight(origin: string) {

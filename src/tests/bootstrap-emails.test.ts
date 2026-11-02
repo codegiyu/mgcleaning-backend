@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseBootstrapEmails } from "./auth/bootstrap-emails.js";
+import { parseBootstrapEmails } from "../auth/bootstrap-emails.js";
 
 describe("parseBootstrapEmails", () => {
   it("accepts one address", () => {

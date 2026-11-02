@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { matchesImageSignature } from "./media/policy.js";
-import { createAdminRouter, type AdminRouterDependencies } from "./routes/v1/admin.js";
+import { matchesImageSignature } from "../media/policy.js";
+import { createAdminRouter, type AdminRouterDependencies } from "../routes/v1/admin.js";
 import {
   assertSafeTarget,
   notificationOutcome,
@@ -8,7 +8,7 @@ import {
   pollUntil,
   sessionCookieProblems,
   TINY_PNG,
-} from "./smoke/helpers.js";
+} from "../smoke/helpers.js";
 
 describe("smoke target guard", () => {
   it("allows local and clearly non-production hosts", () => {
