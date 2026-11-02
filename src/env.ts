@@ -12,6 +12,14 @@ const optionalUrl = z.preprocess(
 
 const DEV_INQUIRY_SECRET = "development-inquiry-security-secret";
 
+/** A bare website origin (scheme, host, optional port); a path or trailing slash is refused, since browsers never send one. */
+const originSchema = z
+  .string()
+  .url()
+  .refine((value) => URL.canParse(value) && new URL(value).origin === value, "Use an origin such as https://www.example.com, with no path or trailing slash.");
+
+const isLocalOrigin = (origin: string) => /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+
 const envSchema = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -20,7 +28,16 @@ const envSchema = z
       (value) => (value === "" ? undefined : value),
       z.enum(["trace", "debug", "info", "warn", "error", "fatal", "silent"]).optional(),
     ),
-    FRONTEND_ORIGIN: z.string().url().default("http://localhost:3000"),
+    /**
+     * Comma-separated website origins allowed to call the API from a browser (CORS and the
+     * Origin check on writes). The first is the primary website: alert emails link to its
+     * dashboard and cache purges go to it.
+     */
+    FRONTEND_ORIGINS: z
+      .string()
+      .default("http://localhost:3000")
+      .transform((value) => value.split(",").map((entry) => entry.trim()).filter(Boolean))
+      .pipe(z.array(originSchema).min(1, "List at least one website origin.")),
     DATABASE_URL: optionalUrl,
     REDIS_URL: optionalUrl,
     EMAIL_PROVIDER: z.enum(["resend", "smtp"]).default("smtp"),
@@ -69,7 +86,7 @@ const envSchema = z
     ),
     /** Shared with the website's /api/revalidate route; signs cache purge requests. */
     REVALIDATE_SECRET: z.preprocess((value) => (value === "" ? undefined : value), z.string().min(32).optional()),
-    /** Defaults to `${FRONTEND_ORIGIN}/api/revalidate`. */
+    /** Defaults to `<first FRONTEND_ORIGINS entry>/api/revalidate`. */
     FRONTEND_REVALIDATE_URL: optionalUrl,
     /** Comma-separated admin emails kept out of the Users list and activity log for everyone but themselves. */
     HIDDEN_ADMIN_EMAILS: z
@@ -99,7 +116,11 @@ const envSchema = z
     for (const key of ["EMAIL_FROM", "INQUIRY_NOTIFICATION_TO"] as const) {
       if (/@example\.(com|org|net)$/i.test(value[key])) refuse(key, `${key} must be a real address in production, not the example default.`);
     }
-    if (!value.FRONTEND_ORIGIN.startsWith("https://")) refuse("FRONTEND_ORIGIN", "FRONTEND_ORIGIN must be the website's https:// origin in production.");
+    const [primaryOrigin, ...extraOrigins] = value.FRONTEND_ORIGINS;
+    if (!primaryOrigin?.startsWith("https://")) refuse("FRONTEND_ORIGINS", "The first FRONTEND_ORIGINS entry must be the website's https:// origin in production.");
+    for (const origin of extraOrigins) {
+      if (!origin.startsWith("https://") && !isLocalOrigin(origin)) refuse("FRONTEND_ORIGINS", `${origin} must use https:// (only localhost may use http://).`);
+    }
     if (value.EMAIL_PROVIDER === "resend" && !value.RESEND_API_KEY) refuse("RESEND_API_KEY", "RESEND_API_KEY is required when EMAIL_PROVIDER=resend.");
   });
 
@@ -107,7 +128,14 @@ export type Env = z.output<typeof envSchema>;
 
 /** Validate a set of variables; the server refuses to start when this throws. */
 export function parseEnv(source: Record<string, string | undefined>): Env {
-  return envSchema.parse(source);
+  // FRONTEND_ORIGIN (one origin) is the old name; it is read only when FRONTEND_ORIGINS is unset.
+  const { FRONTEND_ORIGIN, ...rest } = source;
+  return envSchema.parse({ ...rest, FRONTEND_ORIGINS: rest.FRONTEND_ORIGINS || FRONTEND_ORIGIN });
+}
+
+/** The primary website origin: the first FRONTEND_ORIGINS entry. */
+export function primaryFrontendOrigin(value: Env) {
+  return value.FRONTEND_ORIGINS[0]!; // The schema requires at least one entry.
 }
 
 export const env = parseEnv(process.env);
