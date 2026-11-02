@@ -77,6 +77,11 @@ const envSchema = z
       .default("codegiyu@gmail.com")
       .transform((value) => value.split(",").map((entry) => entry.trim().toLowerCase()).filter(Boolean)),
     MEDIA_MAX_UPLOAD_BYTES: z.coerce.number().int().positive().max(20 * 1024 * 1024).default(5 * 1024 * 1024),
+    /** Seeds labelled placeholder reviews at startup while the reviews table is empty (pre-launch demos only). */
+    SEED_SAMPLE_REVIEWS: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
   })
   .superRefine((value, context) => {
     if (value.NODE_ENV !== "production") return;

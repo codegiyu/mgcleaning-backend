@@ -15,6 +15,7 @@ import { closeInquiryAbuseRedis } from "./security/inquiry-abuse.js";
 import { closeLoginRateLimitRedis } from "./auth/login-rate-limit.js";
 import { closeChannelClickRedis } from "./events/channel-clicks.js";
 import { closeReadinessRedis } from "./routes/v1/readiness.js";
+import { seedSampleReviews } from "./reviews/sample-reviews.js";
 
 const emailWorker = startEmailWorker();
 const mediaMaintenance = startMediaMaintenance();
@@ -29,6 +30,13 @@ const server = serve({
 });
 
 logger.info({ port: env.API_PORT }, "API listening");
+
+// Optional pre-launch demo data. A failure is logged, not fatal: the API serves fine without it.
+if (env.SEED_SAMPLE_REVIEWS) {
+  seedSampleReviews()
+    .then(({ inserted }) => logger.info({ inserted }, inserted ? "sample reviews seeded" : "reviews exist; sample reviews skipped"))
+    .catch((error: unknown) => logger.error({ err: error }, "sample review seeding failed"));
+}
 
 let isShuttingDown = false;
 
