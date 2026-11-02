@@ -7,7 +7,7 @@ import { getDb } from "../../db/client.js";
 import { adminAuditEvents } from "../../db/schema/adminAuditEvents.js";
 import { adminUsers } from "../../db/schema/adminUsers.js";
 import { siteSettings } from "../../db/schema/siteSettings.js";
-import { effectiveNotificationEmail, readSiteSettings, SITE_SETTINGS_ID } from "../../settings/site-settings.js";
+import { notificationRecipients, readSiteSettings, SITE_SETTINGS_ID } from "../../settings/site-settings.js";
 import { forbiddenOrigin, pageResult, pageSchema, requireOwner, trustedOrigin, type PageQuery } from "./admin-shared.js";
 
 type AdminVariables = { Variables: { admin: { id: string; email: string } } };
@@ -27,8 +27,8 @@ export type AuditQuery = PageQuery & { entityType?: AuditEntityType; entityId?: 
 
 export type SettingsView = {
   inquiryNotificationEmail: string | null;
-  /** What alerts actually go to right now, including the environment fallback. */
-  effectiveNotificationEmail: string;
+  /** Every inbox alerts go to right now: the one set here, if any, and always INQUIRY_NOTIFICATION_TO. */
+  notificationRecipients: string[];
   defaultAuthorName: string | null;
   updatedAt: Date | null;
 };
@@ -57,7 +57,7 @@ const settingsPatchSchema = z
 function toSettingsView(row: Awaited<ReturnType<typeof readSiteSettings>>): SettingsView {
   return {
     inquiryNotificationEmail: row?.inquiryNotificationEmail ?? null,
-    effectiveNotificationEmail: effectiveNotificationEmail(row),
+    notificationRecipients: notificationRecipients(row),
     defaultAuthorName: row?.defaultAuthorName ?? null,
     updatedAt: row?.updatedAt ?? null,
   };

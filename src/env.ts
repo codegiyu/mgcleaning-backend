@@ -56,6 +56,7 @@ const envSchema = z
       (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
       z.string().trim().max(80).regex(/^[^"<>\\\r\n]+$/, "Use plain text without quotes, angle brackets, or line breaks.").default("M&G Cleaning Services"),
     ),
+    /** Always receives the inquiry alerts, alongside any inbox set in Admin → Settings. */
     INQUIRY_NOTIFICATION_TO: z.string().email().default("inquiries@example.com"),
     INQUIRY_SECURITY_SECRET: z.string().min(16).default(DEV_INQUIRY_SECRET),
     TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(0),

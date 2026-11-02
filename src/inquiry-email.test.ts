@@ -37,7 +37,7 @@ const contactPayload = {
 
 describe("inquiry emails", () => {
   it("quotes the shared response promises in the customer receipt", async () => {
-    const rows = createEmailOutboxRows(await parsedInquiry(contactPayload), inquiry, "inbox@example.test");
+    const rows = createEmailOutboxRows(await parsedInquiry(contactPayload), inquiry, ["inbox@example.test"]);
     const receipt = rows.find((row) => row.kind === "customer");
     expect(receipt?.message).toContain(`${FORM_RESPONSE_EXPECTATION}.`);
     expect(receipt?.message).toContain(`${MESSAGE_RESPONSE_EXPECTATION}.`);
@@ -45,7 +45,7 @@ describe("inquiry emails", () => {
   });
 
   it("gives the internal alert one-tap actions and replies that reach the customer", async () => {
-    const rows = createEmailOutboxRows(await parsedInquiry(contactPayload), inquiry, "inbox@example.test", "https://mgcleaning.example");
+    const rows = createEmailOutboxRows(await parsedInquiry(contactPayload), inquiry, ["inbox@example.test"], "https://mgcleaning.example");
     const alert = rows.find((row) => row.kind === "internal");
     expect(alert?.actions?.map((action) => action.label)).toEqual(["Reply on WhatsApp", "Call", "Open in dashboard"]);
     expect(alert?.replyTo).toBe("mary@example.test");
@@ -59,7 +59,7 @@ describe("inquiry emails", () => {
 
   it("sends no receipt when the customer gave no email", async () => {
     const { email: _omitted, ...withoutEmail } = contactPayload;
-    const rows = createEmailOutboxRows(await parsedInquiry(withoutEmail), inquiry, "inbox@example.test");
+    const rows = createEmailOutboxRows(await parsedInquiry(withoutEmail), inquiry, ["inbox@example.test"]);
     expect(rows.map((row) => row.kind)).toEqual(["internal"]);
     expect(rows[0].replyTo).toBeNull();
   });

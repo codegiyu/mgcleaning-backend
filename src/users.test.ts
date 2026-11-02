@@ -34,8 +34,8 @@ function app(actor: Actor, users: Partial<UsersRouterDependencies> = {}, operati
   };
   const operationsDependencies: OperationsRouterDependencies = {
     async listAudit() { return { items: [], total: 0 }; },
-    async getSettings() { return { inquiryNotificationEmail: null, effectiveNotificationEmail: "inbox@example.test", defaultAuthorName: null, updatedAt: null }; },
-    async updateSettings() { return { inquiryNotificationEmail: "new@example.test", effectiveNotificationEmail: "new@example.test", defaultAuthorName: null, updatedAt: null }; },
+    async getSettings() { return { inquiryNotificationEmail: null, notificationRecipients: ["inbox@example.test"], defaultAuthorName: null, updatedAt: null }; },
+    async updateSettings() { return { inquiryNotificationEmail: "new@example.test", notificationRecipients: ["new@example.test", "inbox@example.test"], defaultAuthorName: null, updatedAt: null }; },
     ...operations,
   };
   const session = { id: actor.role === "owner" ? ownerId : staffId, email: "someone@example.test", sessionId: "c0ffee00-1d2e-4f3a-8b9c-0d1e2f3a4b5c", role: actor.role, mustChangePassword: actor.mustChangePassword ?? false };
