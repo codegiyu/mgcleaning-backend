@@ -52,7 +52,7 @@ jobs:
       # The suite empties every table, so the database name must contain "test".
       DATABASE_URL: postgres://mgcleaning:mgcleaning-ci@localhost:5432/mgcleaning_test
       REDIS_URL: redis://localhost:6379
-      FRONTEND_ORIGIN: http://localhost:3000
+      FRONTEND_ORIGINS: http://localhost:3000
       INQUIRY_SECURITY_SECRET: ci-only-inquiry-security-secret-not-for-production
     steps:
       - uses: actions/checkout@v4

@@ -12,7 +12,7 @@ import { sampleReviews, seedSampleReviews } from "./reviews/sample-reviews.js";
  * The real app against real Postgres and Redis: queries, constraints, cascades, and the
  * session cookie flow that the unit tests replace with fakes.
  */
-const origin = process.env.FRONTEND_ORIGIN ?? "http://localhost:3000";
+const origin = process.env.FRONTEND_ORIGINS?.split(",")[0]?.trim() || "http://localhost:3000";
 const ownerEmail = "owner@integration.test";
 const ownerPassword = "an-integration-owner-password";
 

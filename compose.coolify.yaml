@@ -56,7 +56,7 @@ services:
       NODE_ENV: production
       API_PORT: "4100"
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:?}
+      FRONTEND_ORIGINS: ${FRONTEND_ORIGINS:?}
       DATABASE_URL: postgresql://${SERVICE_USER_POSTGRES}:${SERVICE_PASSWORD_64_POSTGRES}@postgres:5432/mgcleaning
       REDIS_URL: redis://redis:6379
       EMAIL_PROVIDER: resend
