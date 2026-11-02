@@ -2,7 +2,11 @@ import { and, desc, eq, gt, ne } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { auditContextFrom, recordAudit, type AuditContext } from "../../audit/audit.js";
-import { allowAttempt, clearAttempts } from "../../auth/login-rate-limit.js";
+import { allowAttempt, allowPasswordResetRequest, clearAttempts } from "../../auth/login-rate-limit.js";
+import { issuePasswordReset, PASSWORD_RESET_MINUTES } from "../../auth/password-reset.js";
+import { env, primaryFrontendOrigin } from "../../env.js";
+import { enqueueEmail } from "../../queue/email.queue.js";
+import { logger } from "../../logger.js";
 import { hashPassword, verifyPassword } from "../../auth/password.js";
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "../../auth/password-policy.js";
 import { getDb } from "../../db/client.js";
@@ -38,6 +42,8 @@ export type AccountRouterDependencies = {
   /** Scoped to the owner, so one admin cannot revoke another admin's session by ID. */
   revokeSession: (userId: string, sessionId: string, audit: AuditContext) => Promise<boolean>;
   revokeOtherSessions: (userId: string, keepSessionId: string, audit: AuditContext) => Promise<number>;
+  /** Emails the admin a reset link, for when they have forgotten their current password. */
+  sendPasswordResetLink: (email: string, audit: AuditContext) => Promise<"sent" | "rate-limited">;
 };
 
 const changePasswordSchema = z
@@ -49,6 +55,13 @@ const changePasswordSchema = z
 
 function buildProductionDependencies(): AccountRouterDependencies {
   return {
+    async sendPasswordResetLink(email, audit) {
+      if (!(await allowPasswordResetRequest(email, audit.ipHash ?? "unknown"))) return "rate-limited";
+      const issued = await issuePasswordReset(email, primaryFrontendOrigin(env), audit);
+      // The outbox row is committed; if queueing fails, the worker's pending sweep sends it.
+      if (issued) await enqueueEmail({ outboxId: issued.outboxId }).catch((error: unknown) => logger.warn({ err: error }, "password reset email not queued"));
+      return "sent";
+    },
     async changePassword({ userId, keepSessionId, currentPassword, newPassword }, audit) {
       if (!(await allowAttempt("admin-password-change", userId))) return { kind: "rate-limited" };
       const [user] = await getDb()
@@ -160,6 +173,16 @@ export function createAccountRouter(dependencies: AccountRouterDependencies = bu
       responseCode: 200,
       data: { revokedSessions: result.revokedSessions },
     });
+  });
+
+  router.post("/password-reset-link", async (context) => {
+    if (!trustedOrigin(context)) return forbiddenOrigin(context);
+    const admin = context.get("admin");
+    const result = await dependencies.sendPasswordResetLink(admin.email, auditContextFrom(context, admin.id));
+    if (result === "rate-limited") {
+      return context.json({ success: false as const, message: "Too many reset requests. Try again in an hour.", responseCode: 429 }, 429);
+    }
+    return context.json({ success: true as const, message: `We've sent a reset link to ${admin.email}. It works for ${PASSWORD_RESET_MINUTES} minutes.`, responseCode: 200 });
   });
 
   router.get("/sessions", async (context) => {

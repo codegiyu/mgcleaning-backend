@@ -8,6 +8,7 @@ import { auditContextFrom, changedFields, recordAudit, type AuditAction, type Au
 import { env } from "../../env.js";
 import { BLOG_POST_SLUG_CONSTRAINT, isUniqueViolation } from "../../db/errors.js";
 import { getRequestLogger } from "../../request-context.js";
+import { createPasswordResetRouter } from "./password-reset.js";
 import { escapeLike, forbiddenOrigin, pageResult, parsePageQuery, requireOwner, trustedOrigin, uuidSchema, type PageQuery } from "./admin-shared.js";
 import { createMediaRouter } from "./media.js";
 import { createAccountRouter, type SessionActor } from "./account.js";
@@ -539,11 +540,13 @@ export function createAdminRouter(
   operationsRouter = createOperationsRouter(),
   reviewsRouter = createReviewsAdminRouter(),
   usersRouter = createUsersRouter(),
+  passwordResetRouter = createPasswordResetRouter(),
 ) {
   const router = new Hono<{ Variables: { admin: SessionActor } }>();
 
   router.use("*", async (context, next) => {
-    if (context.req.path.endsWith("/auth/login") || context.req.path.endsWith("/auth/session")) return next();
+    // Signing in and resetting a forgotten password happen before there is a session.
+    if (context.req.path.endsWith("/auth/login") || context.req.path.endsWith("/auth/session") || context.req.path.includes("/auth/password-reset/")) return next();
     const token = getCookie(context, SESSION_COOKIE);
     const actor = token ? await dependencies.resolveSession(token) : null;
     if (!actor) {
@@ -741,6 +744,7 @@ export function createAdminRouter(
     return context.json({ success: true as const, message: "Blog post updated.", responseCode: 200, data: result.post });
   });
 
+  router.route("/auth/password-reset", passwordResetRouter);
   router.route("/media", mediaRouter);
   router.route("/account", accountRouter);
   router.route("/reviews", reviewsRouter);

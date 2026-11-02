@@ -12,8 +12,14 @@ import { emailOutbox } from "../db/schema/emailOutbox.js";
 import { NotificationEmail } from "../emails/notification.js";
 import { plainTextBody } from "../emails/alert-actions.js";
 import { emailSender } from "../emails/sender.js";
+import { PASSWORD_RESET_KIND } from "../auth/password-reset.js";
 import { enqueueEmail, EMAIL_QUEUE_NAME, type OutboundEmailJob } from "./email.queue.js";
 import { createWorkerRedisConnection } from "./redis.js";
+
+/** A password-reset email carries a live link, so its body is blanked once it is sent or given up on. */
+function finishedBody(kind: string) {
+  return kind === PASSWORD_RESET_KIND ? { message: "", actions: [] } : {};
+}
 
 export function startEmailWorker() {
   const logger = rootLogger.child({ component: "email-worker" });
@@ -60,7 +66,7 @@ export function startEmailWorker() {
       if (outbox.attempts >= env.INQUIRY_MAX_EMAIL_ATTEMPTS) {
         await getDb()
           .update(emailOutbox)
-          .set({ status: "dead_letter", updatedAt: new Date() })
+          .set({ status: "dead_letter", updatedAt: new Date(), ...finishedBody(outbox.kind) })
           .where(eq(emailOutbox.id, outbox.id));
         return;
       }
@@ -100,7 +106,7 @@ export function startEmailWorker() {
 
         await getDb()
           .update(emailOutbox)
-          .set({ status: "sent", sentAt: new Date(), updatedAt: new Date(), lastError: null })
+          .set({ status: "sent", sentAt: new Date(), updatedAt: new Date(), lastError: null, ...finishedBody(outbox.kind) })
           .where(eq(emailOutbox.id, outbox.id));
       } catch (error) {
         const nextAttempts = outbox.attempts + 1;
@@ -112,6 +118,7 @@ export function startEmailWorker() {
           .update(emailOutbox)
           .set({
             status: deadLetter ? "dead_letter" : "failed",
+            ...(deadLetter ? finishedBody(outbox.kind) : {}),
             lastError: safeMessage,
             availableAt: new Date(Date.now() + Math.min(60_000 * 2 ** Math.max(0, nextAttempts - 1), 3_600_000)),
             updatedAt: new Date(),

@@ -11,6 +11,7 @@ export const auditActions = [
   "auth.logout",
   "auth.password_change",
   "auth.password_reset",
+  "auth.password_reset_request",
   "auth.session_revoke",
   "inquiry.update",
   "inquiry.delete",
