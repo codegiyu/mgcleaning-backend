@@ -15,6 +15,13 @@
       "when": 1793650463480,
       "tag": "0001_outbox_one_row_per_recipient",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793651656987,
+      "tag": "0002_admin_password_resets",
+      "breakpoints": true
     }
   ]
 }
