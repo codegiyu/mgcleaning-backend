@@ -4,7 +4,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { app } from "../app.js";
 import { hashPassword } from "../auth/password.js";
 import { closeDb, getDb } from "../db/client.js";
-import { adminAuditEvents, adminUsers, cacheRevalidations, contactInquiries, emailOutbox, reviews } from "../db/schema/index.js";
+import { adminAuditEvents, adminUsers, cacheRevalidations, contactInquiries, emailOutbox, reviews, siteSettings } from "../db/schema/index.js";
 import { runRetention } from "../maintenance/retention.js";
 import { sampleReviews, seedSampleReviews } from "../reviews/sample-reviews.js";
 
@@ -64,6 +64,23 @@ describe("an enquiry from the website", () => {
     expect(alert?.actions.map((action) => action.label)).toEqual(["Reply on WhatsApp", "Call", "Open in dashboard"]);
     expect(alert?.replyTo).toBe("ada@integration.test");
     expect(rows.some((row) => row.kind === "customer")).toBe(true);
+  });
+
+  it("stores one team alert per inbox when a Settings inbox is set as well", async () => {
+    await getDb().insert(siteSettings).values({ id: 1, inquiryNotificationEmail: "team@integration.test" }).onConflictDoUpdate({ target: siteSettings.id, set: { inquiryNotificationEmail: "team@integration.test" } });
+    try {
+      const response = await api("/inquiries", {
+        method: "POST",
+        headers: { "Idempotency-Key": randomUUID() },
+        body: JSON.stringify({ name: "Bola Integration", phone: "0816 771 5347", inquiryType: "contact", topic: "General question", message: "Testing alerts to two inboxes." }),
+      });
+      expect(response.status).toBe(201);
+      const { data } = await response.json();
+      const rows = await getDb().select().from(emailOutbox).where(eq(emailOutbox.inquiryId, data.inquiryId));
+      expect(rows.filter((row) => row.kind === "internal").map((row) => row.to).sort()).toEqual(["inquiries@example.com", "team@integration.test"].sort());
+    } finally {
+      await getDb().update(siteSettings).set({ inquiryNotificationEmail: null }).where(eq(siteSettings.id, 1));
+    }
   });
 });
 
