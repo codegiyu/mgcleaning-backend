@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import type { Context } from "hono";
-import { env } from "../../env.js";
+import { env, primaryFrontendOrigin } from "../../env.js";
 import { logger } from "../../logger.js";
 import { getRequestLogger } from "../../request-context.js";
 import { effectiveNotificationEmail, readSiteSettings } from "../../settings/site-settings.js";
@@ -177,7 +177,7 @@ export function createEmailOutboxRows(
   input: ParsedInquiry,
   inquiry: { id: string; reference: string },
   recipient: string,
-  adminOrigin: string = env.FRONTEND_ORIGIN,
+  adminOrigin: string = primaryFrontendOrigin(env),
 ): NewEmailOutbox[] {
   const actions = buildAlertActions({ id: inquiry.id, reference: inquiry.reference, phone: input.phone, preferredContactMethod: input.preferredContactMethod }, adminOrigin);
   const details = [

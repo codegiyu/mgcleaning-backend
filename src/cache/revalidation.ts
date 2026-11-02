@@ -3,7 +3,7 @@ import { and, eq, inArray, lte, sql } from "drizzle-orm";
 import type { Logger } from "pino";
 import { getDb } from "../db/client.js";
 import { cacheRevalidations } from "../db/schema/cacheRevalidations.js";
-import { env } from "../env.js";
+import { env, primaryFrontendOrigin } from "../env.js";
 import { logger as rootLogger } from "../logger.js";
 
 export type RevalidationMode = "refresh" | "remove";
@@ -132,7 +132,8 @@ export async function dispatchDueRevalidations(target: RevalidationTarget, logge
 export function revalidationTarget(): RevalidationTarget | null {
   if (!env.REVALIDATE_SECRET) return null;
   return {
-    url: env.FRONTEND_REVALIDATE_URL ?? `${env.FRONTEND_ORIGIN.replace(/\/+$/, "")}/api/revalidate`,
+    // Origins are validated without a trailing slash, so no trimming is needed.
+    url: env.FRONTEND_REVALIDATE_URL ?? `${primaryFrontendOrigin(env)}/api/revalidate`,
     secret: env.REVALIDATE_SECRET,
   };
 }
