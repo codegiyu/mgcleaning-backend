@@ -213,7 +213,7 @@ export function createEmailOutboxRows(
     inquiryId: inquiry.id,
     kind: "internal",
     to: recipient,
-    subject: `New M&G Cleaning Services ${input.inquiryType === "booking" ? "cleaning request" : "contact message"} · ${inquiry.reference}`,
+    subject: input.inquiryType === "booking" ? "Booking form submission received" : "Contact form submission received",
     title: input.inquiryType === "booking" ? "New cleaning request" : "New contact message",
     message: details.join("\n\n"),
     actions,
@@ -224,7 +224,7 @@ export function createEmailOutboxRows(
       inquiryId: inquiry.id,
       kind: "customer",
       to: input.email,
-      subject: `M&G Cleaning Services request received · ${inquiry.reference}`,
+      subject: `Request received · ${inquiry.reference}`,
       title: "Your cleaning request has been received",
       message: customerMessage,
     });

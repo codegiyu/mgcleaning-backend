@@ -42,6 +42,8 @@ describe("inquiry emails", () => {
     expect(receipt?.message).toContain(`${FORM_RESPONSE_EXPECTATION}.`);
     expect(receipt?.message).toContain(`${MESSAGE_RESPONSE_EXPECTATION}.`);
     expect(receipt?.message).not.toMatch(/business day/i);
+    // The sender name (EMAIL_FROM_NAME) carries the brand, so the subject does not repeat it.
+    expect(receipt?.subject).toBe(`Request received · ${inquiry.reference}`);
   });
 
   it("gives the internal alert one-tap actions and replies that reach the customer", async () => {
@@ -55,6 +57,15 @@ describe("inquiry emails", () => {
     const receipt = rows.find((row) => row.kind === "customer");
     expect(receipt?.actions).toBeUndefined();
     expect(receipt?.replyTo).toBeUndefined();
+  });
+
+  it("sends the team alert to every inbox, with a subject naming the form", async () => {
+    const rows = createEmailOutboxRows(await parsedInquiry(contactPayload), inquiry, ["team@example.test", "inquiries@example.test"]);
+    const alerts = rows.filter((row) => row.kind === "internal");
+    expect(alerts.map((row) => row.to)).toEqual(["team@example.test", "inquiries@example.test"]);
+    expect(alerts.map((row) => row.subject)).toEqual(["Contact form submission received", "Contact form submission received"]);
+    const booking = createEmailOutboxRows({ ...(await parsedInquiry(contactPayload)), inquiryType: "booking" }, inquiry, ["team@example.test"]);
+    expect(booking.find((row) => row.kind === "internal")?.subject).toBe("Booking form submission received");
   });
 
   it("sends no receipt when the customer gave no email", async () => {
