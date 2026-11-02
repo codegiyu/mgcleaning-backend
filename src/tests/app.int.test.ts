@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { app } from "../app.js";
-import { hashPassword } from "../auth/password.js";
+import { bootstrapAdmins } from "../auth/bootstrap-admins.js";
+import { hashPassword, verifyPassword } from "../auth/password.js";
 import { closeDb, getDb } from "../db/client.js";
 import { adminAuditEvents, adminPasswordResets, adminUsers, cacheRevalidations, contactInquiries, emailOutbox, reviews, siteSettings } from "../db/schema/index.js";
 import { runRetention } from "../maintenance/retention.js";
@@ -81,6 +82,30 @@ describe("an enquiry from the website", () => {
     } finally {
       await getDb().update(siteSettings).set({ inquiryNotificationEmail: null }).where(eq(siteSettings.id, 1));
     }
+  });
+});
+
+describe("bootstrap admins", () => {
+  it("creates missing owners once and never changes an existing account", async () => {
+    const existingEmail = "existing-owner@integration.test";
+    const existingHash = await hashPassword("an-existing-owner-password");
+    await getDb().insert(adminUsers).values({ email: existingEmail, role: "owner", passwordHash: existingHash });
+
+    const first = await bootstrapAdmins(`New-Owner@Integration.test, ${existingEmail}`, "a-bootstrap-owner-password");
+    expect(first).toEqual({ created: ["new-owner@integration.test"], existing: [existingEmail] });
+    const second = await bootstrapAdmins(`new-owner@integration.test,${existingEmail}`, "a-different-password-now");
+    expect(second.created).toEqual([]);
+
+    const [created] = await getDb().select().from(adminUsers).where(eq(adminUsers.email, "new-owner@integration.test"));
+    expect(created?.role).toBe("owner");
+    expect(created?.mustChangePassword).toBe(true);
+    expect(await verifyPassword("a-bootstrap-owner-password", created!.passwordHash)).toBe(true);
+    const [untouched] = await getDb().select().from(adminUsers).where(eq(adminUsers.email, existingEmail));
+    expect(untouched?.passwordHash).toBe(existingHash);
+  });
+
+  it("refuses a password that breaks the policy", async () => {
+    await expect(bootstrapAdmins("short-pass@integration.test", "short")).rejects.toThrow(/Initial admin password/);
   });
 });
 

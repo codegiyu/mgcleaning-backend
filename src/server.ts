@@ -16,6 +16,7 @@ import { closeLoginRateLimitRedis } from "./auth/login-rate-limit.js";
 import { closeChannelClickRedis } from "./events/channel-clicks.js";
 import { closeReadinessRedis } from "./routes/v1/readiness.js";
 import { seedSampleReviews } from "./reviews/sample-reviews.js";
+import { bootstrapAdmins } from "./auth/bootstrap-admins.js";
 
 const emailWorker = startEmailWorker();
 const mediaMaintenance = startMediaMaintenance();
@@ -30,6 +31,17 @@ const server = serve({
 });
 
 logger.info({ port: env.API_PORT }, "API listening");
+
+// Owner accounts from the bootstrap variables, created only when missing. A failure is
+// logged, not fatal; emails are not logged, only counts.
+if (env.BOOTSTRAP_ADMIN_EMAIL || env.BOOTSTRAP_ADMIN_PASSWORD) {
+  bootstrapAdmins(env.BOOTSTRAP_ADMIN_EMAIL, env.BOOTSTRAP_ADMIN_PASSWORD)
+    .then(({ created, existing }) => {
+      logger.info({ created: created.length, existing: existing.length }, created.length ? "bootstrap admins created" : "bootstrap admins already exist");
+      logger.warn("BOOTSTRAP_ADMIN_PASSWORD is set; remove it once the owners have signed in");
+    })
+    .catch((error: unknown) => logger.error({ err: error }, "admin bootstrap failed"));
+}
 
 // Optional pre-launch demo data. A failure is logged, not fatal: the API serves fine without it.
 if (env.SEED_SAMPLE_REVIEWS) {
