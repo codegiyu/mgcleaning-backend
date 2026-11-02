@@ -1,7 +1,8 @@
 import { and, asc, count, eq, isNull, ne } from "drizzle-orm";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { auditContextFrom, recordAudit, type AuditContext } from "../../audit/audit.js";
+import { isHiddenFrom } from "../../auth/hidden-admins.js";
 import { hashPassword } from "../../auth/password.js";
 import { generateTemporaryPassword } from "../../auth/temporary-password.js";
 import { getDb } from "../../db/client.js";
@@ -138,14 +139,22 @@ function refused(message: string, status: 400 | 404 | 409) {
  * Owner-only account management, mounted at `/v1/admin/users`. Temporary passwords are
  * generated here, returned once in the response for the owner to pass on, and must be
  * replaced at first sign-in. Owners change other accounts, never their own, so an active
- * owner always remains.
+ * owner always remains. Hidden accounts (HIDDEN_ADMIN_EMAILS) are invisible to everyone
+ * else: left out of the list and answered with 404 as if they did not exist.
  */
 export function createUsersRouter(dependencies: UsersRouterDependencies = buildProductionDependencies()) {
   const router = new Hono<AdminVariables>();
   router.use("*", requireOwner);
 
+  /** The account with this id, unless it is hidden from the signed-in admin. */
+  async function visibleUser(context: Context<AdminVariables>, id: string) {
+    const viewer = context.get("admin").email;
+    return (await dependencies.listUsers()).find((user) => user.id === id && !isHiddenFrom(user.email, viewer));
+  }
+
   router.get("/", async (context) => {
-    const data = await dependencies.listUsers();
+    const viewer = context.get("admin").email;
+    const data = (await dependencies.listUsers()).filter((user) => !isHiddenFrom(user.email, viewer));
     return context.json({ success: true as const, message: "Accounts loaded.", responseCode: 200, data });
   });
 
@@ -153,6 +162,8 @@ export function createUsersRouter(dependencies: UsersRouterDependencies = buildP
     if (!trustedOrigin(context)) return forbiddenOrigin(context);
     const parsed = createSchema.safeParse(await context.req.json().catch(() => null));
     if (!parsed.success) return context.json(refused("Enter a valid email address.", 400), 400);
+    // Answer as for any taken address, so a hidden account's email cannot be probed.
+    if (isHiddenFrom(parsed.data.email, context.get("admin").email)) return context.json(refused("An account with that email already exists.", 409), 409);
     const temporaryPassword = generateTemporaryPassword();
     const result = await dependencies.createUser(
       { ...parsed.data, passwordHash: await hashPassword(temporaryPassword) },
@@ -167,6 +178,7 @@ export function createUsersRouter(dependencies: UsersRouterDependencies = buildP
     const id = uuidSchema.safeParse(context.req.param("id"));
     if (!id.success) return context.json(refused("Account not found.", 404), 404);
     if (id.data === context.get("admin").id) return context.json(refused("Ask another owner to change your own role or access.", 400), 400);
+    if (!(await visibleUser(context, id.data))) return context.json(refused("Account not found.", 404), 404);
     const parsed = updateSchema.safeParse(await context.req.json().catch(() => null));
     if (!parsed.success) return context.json(refused("Choose a role or access change.", 400), 400);
     const result = await dependencies.updateUser(id.data, parsed.data, auditContextFrom(context, context.get("admin").id));
@@ -180,6 +192,7 @@ export function createUsersRouter(dependencies: UsersRouterDependencies = buildP
     const id = uuidSchema.safeParse(context.req.param("id"));
     if (!id.success) return context.json(refused("Account not found.", 404), 404);
     if (id.data === context.get("admin").id) return context.json(refused("Change your own password from Settings.", 400), 400);
+    if (!(await visibleUser(context, id.data))) return context.json(refused("Account not found.", 404), 404);
     const temporaryPassword = generateTemporaryPassword();
     const result = await dependencies.resetPassword(id.data, await hashPassword(temporaryPassword), auditContextFrom(context, context.get("admin").id));
     if (result.kind === "not-found") return context.json(refused("Account not found.", 404), 404);

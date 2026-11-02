@@ -56,4 +56,10 @@ describe("parseEnv", () => {
   it("does not need a Resend key when sending through SMTP", () => {
     expect(problems({ ...production, EMAIL_PROVIDER: "smtp", RESEND_API_KEY: undefined, SMTP_HOST: "smtp.mgcleaning.ng" })).toEqual([]);
   });
+
+  it("hides codegiyu@gmail.com by default and reads a custom comma-separated list", () => {
+    expect(parseEnv({}).HIDDEN_ADMIN_EMAILS).toEqual(["codegiyu@gmail.com"]);
+    expect(parseEnv({ HIDDEN_ADMIN_EMAILS: " A@x.test , b@x.test," }).HIDDEN_ADMIN_EMAILS).toEqual(["a@x.test", "b@x.test"]);
+    expect(parseEnv({ HIDDEN_ADMIN_EMAILS: "" }).HIDDEN_ADMIN_EMAILS).toEqual([]);
+  });
 });

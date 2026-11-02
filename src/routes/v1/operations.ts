@@ -1,3 +1,4 @@
+import { HIDDEN_ACTOR_LABEL, isHiddenFrom } from "../../auth/hidden-admins.js";
 import { and, count, desc, eq, type SQL } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -129,7 +130,12 @@ export function createOperationsRouter(dependencies: OperationsRouterDependencie
       return context.json({ success: false as const, message: "Invalid activity filters.", responseCode: 400 }, 400);
     }
     const result = await dependencies.listAudit(parsed.data);
-    return context.json({ success: true as const, message: "Activity loaded.", responseCode: 200, data: pageResult(result.items, result.total, parsed.data) });
+    // A hidden account's actions stay in the log, but not its email.
+    const viewer = context.get("admin").email;
+    const items = result.items.map((item) =>
+      item.actorEmail && isHiddenFrom(item.actorEmail, viewer) ? { ...item, actorEmail: HIDDEN_ACTOR_LABEL } : item,
+    );
+    return context.json({ success: true as const, message: "Activity loaded.", responseCode: 200, data: pageResult(items, result.total, parsed.data) });
   });
 
   router.get("/settings", async (context) => {

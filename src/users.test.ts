@@ -133,3 +133,58 @@ describe("temporary passwords", () => {
     for (const password of passwords) expect(password).toMatch(/^[a-km-np-zA-HJ-NP-Z2-9]{4}(-[a-km-np-zA-HJ-NP-Z2-9]{4}){3}$/);
   });
 });
+
+describe("hidden accounts", () => {
+  const hiddenId = "0f1e2d3c-4b5a-4968-8776-655443322110";
+  const hiddenUser: AdminUserView = { ...staffUser, id: hiddenId, email: "codegiyu@gmail.com", role: "owner" };
+  const withHidden = { async listUsers() { return [staffUser, hiddenUser]; } };
+
+  it("leaves the hidden account out of the list for other admins", async () => {
+    const response = await app({ role: "owner" }, withHidden).request("/users", { headers });
+    const { data } = await response.json();
+    expect(data.map((user: AdminUserView) => user.email)).toEqual(["staff@example.test"]);
+  });
+
+  it("shows it to the hidden admin themselves, whatever the letter case", async () => {
+    const session = { id: hiddenId, email: "CodeGiyu@Gmail.com", sessionId: "c0ffee00-1d2e-4f3a-8b9c-0d1e2f3a4b5c", role: "owner", mustChangePassword: false };
+    const admin = createAdminRouter({ async resolveSession(value: string) { return value === token ? session : null; } } as unknown as AdminRouterDependencies, undefined, undefined, undefined, undefined, createUsersRouter({ ...(await usersDefaults()), ...withHidden }));
+    const { data } = await (await admin.request("/users", { headers })).json();
+    expect(data.map((user: AdminUserView) => user.email)).toContain("codegiyu@gmail.com");
+  });
+
+  it.each([
+    ["PATCH", { active: false }, "/users/" ],
+    ["POST", undefined, "/users/"],
+  ])("answers %s on it with 404 for other admins", async (method, body, base) => {
+    const path = method === "PATCH" ? `${base}${hiddenId}` : `${base}${hiddenId}/reset-password`;
+    const updateUser = vi.fn<UsersRouterDependencies["updateUser"]>();
+    const resetPassword = vi.fn<UsersRouterDependencies["resetPassword"]>();
+    const response = await app({ role: "owner" }, { ...withHidden, updateUser, resetPassword }).request(path, { method, headers, ...(body ? { body: JSON.stringify(body) } : {}) });
+    expect(response.status).toBe(404);
+    expect(updateUser).not.toHaveBeenCalled();
+    expect(resetPassword).not.toHaveBeenCalled();
+  });
+
+  it("does not reveal it through the create-account check", async () => {
+    const createUser = vi.fn<UsersRouterDependencies["createUser"]>();
+    const response = await app({ role: "owner" }, { ...withHidden, createUser }).request("/users", { method: "POST", headers, body: JSON.stringify({ email: "CODEGIYU@gmail.com" }) });
+    expect(response.status).toBe(409);
+    expect(createUser).not.toHaveBeenCalled();
+  });
+
+  it("replaces its email in the activity log for other admins only", async () => {
+    const event = { id: "e1", action: "settings.update", entityType: "site_settings", entityId: "1", actorEmail: "codegiyu@gmail.com", metadata: {}, requestId: null, createdAt: new Date("2026-11-01T09:00:00.000Z") };
+    const listAudit = async () => ({ items: [event, { ...event, id: "e2", actorEmail: "staff@example.test" }], total: 2 });
+    const { data } = await (await app({ role: "staff" }, {}, { listAudit }).request("/audit", { headers })).json();
+    expect(data.items.map((item: { actorEmail: string }) => item.actorEmail)).toEqual(["Site administrator", "staff@example.test"]);
+  });
+});
+
+async function usersDefaults(): Promise<UsersRouterDependencies> {
+  return {
+    async listUsers() { return [staffUser]; },
+    async createUser(input) { return { kind: "created", user: { ...staffUser, email: input.email, role: input.role } }; },
+    async updateUser() { return { kind: "updated", user: staffUser }; },
+    async resetPassword() { return { kind: "reset", user: staffUser }; },
+  };
+}
