@@ -226,6 +226,13 @@ describe("media library", () => {
     expect(body.data.items[0]).not.toHaveProperty("key");
   });
 
+  it("narrows the library to one intent and refuses an unknown one", async () => {
+    const listVerified = vi.fn<MediaRouterDependencies["listVerified"]>(async () => ({ items: [], total: 0 }));
+    expect((await media({ listVerified }).request("/media?intent=blog-cover", { headers })).status).toBe(200);
+    expect(listVerified).toHaveBeenCalledWith(expect.objectContaining({ intent: "blog-cover" }));
+    expect((await media({ listVerified }).request("/media?intent=avatar", { headers })).status).toBe(400);
+  });
+
   it("refuses to delete an image used as a cover", async () => {
     const storage = fakeStorage();
     const response = await media({ async softDelete() { return { kind: "in-use" }; } }, storage).request(`/media/${assetId}`, { method: "DELETE", headers });

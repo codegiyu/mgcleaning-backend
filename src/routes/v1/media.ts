@@ -53,7 +53,8 @@ export type MediaRouterDependencies = {
   markVerified: (id: string, byteSize: number, audit: AuditContext) => Promise<MediaAsset | null>;
   markFailed: (id: string, reason: string) => Promise<void>;
   markExpired: (id: string) => Promise<void>;
-  listVerified: (query: PageQuery) => Promise<{ items: MediaAsset[]; total: number }>;
+  /** Newest first; `intent` narrows it, e.g. so the article cover library never offers gallery videos. */
+  listVerified: (query: PageQuery & { intent?: MediaIntent }) => Promise<{ items: MediaAsset[]; total: number }>;
   updateAltText: (id: string, altText: string | null, audit: AuditContext) => Promise<MediaAsset | null>;
   softDelete: (id: string, audit: AuditContext) => Promise<DeleteAssetResult>;
   markObjectRemoved: (id: string) => Promise<void>;
@@ -165,7 +166,7 @@ function buildProductionDependencies(): MediaRouterDependencies {
         .where(and(eq(mediaAssets.id, id), eq(mediaAssets.status, "pending")));
     },
     async listVerified(query) {
-      const where = and(eq(mediaAssets.status, "verified"));
+      const where = and(eq(mediaAssets.status, "verified"), query.intent ? eq(mediaAssets.intent, query.intent) : undefined);
       const db = getDb();
       const [items, totals] = await Promise.all([
         db
@@ -365,10 +366,11 @@ export function createMediaRouter(dependencies: MediaRouterDependencies = buildP
 
   router.get("/", async (context) => {
     const parsed = parsePageQuery(context);
-    if (!parsed.success) {
+    const intent = z.enum(mediaIntents).optional().safeParse(context.req.query("intent") || undefined);
+    if (!parsed.success || !intent.success) {
       return context.json({ success: false as const, message: "Invalid image filters.", responseCode: 400 }, 400);
     }
-    const result = await dependencies.listVerified(parsed.data);
+    const result = await dependencies.listVerified({ ...parsed.data, ...(intent.data ? { intent: intent.data } : {}) });
     return context.json({
       success: true as const,
       message: "Images loaded.",
