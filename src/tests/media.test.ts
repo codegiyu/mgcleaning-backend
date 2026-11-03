@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { MediaAsset } from "../db/schema/mediaAssets.js";
 import { runMediaMaintenance } from "../media/maintenance.js";
-import { buildMediaKey, matchesImageSignature, resolveImageUpload } from "../media/policy.js";
+import { buildMediaKey, matchesMediaSignature, maxBytesFor, resolveMediaUpload } from "../media/policy.js";
 import { createAdminRouter, type AdminRouterDependencies } from "../routes/v1/admin.js";
 import { createMediaRouter, sanitizeFilename, type MediaRouterDependencies, type PendingAssetInput } from "../routes/v1/media.js";
 import { createR2Storage, MediaStorageUnavailableError, type MediaStorage, type StoredObject } from "../storage/r2.js";
@@ -14,6 +14,8 @@ const headers = { Cookie: `mg_admin_session=${token}`, Origin: "http://localhost
 
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d]);
 const WEBP_BYTES = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0x10, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]);
+const MP4_BYTES = new Uint8Array([0, 0, 0, 0x20, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]);
+const WEBM_BYTES = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81, 0x01, 0x42, 0xf7, 0x81]);
 
 function asset(overrides: Partial<MediaAsset> = {}): MediaAsset {
   return {
@@ -98,6 +100,29 @@ describe("media upload URLs", () => {
     const response = await media({}, storage).request("/media/uploads", { method: "POST", headers, body: JSON.stringify({ ...uploadRequest, byteSize: 50 * 1024 * 1024 }) });
     expect(response.status).toBe(413);
     expect(storage.presignPut).not.toHaveBeenCalled();
+  });
+
+  it("refuses video for article covers and MOV everywhere", async () => {
+    const storage = fakeStorage();
+    const cover = await media({}, storage).request("/media/uploads", { method: "POST", headers, body: JSON.stringify({ ...uploadRequest, fileExtension: "mp4" }) });
+    expect(cover.status).toBe(400);
+    const mov = await media({}, storage).request("/media/uploads", { method: "POST", headers, body: JSON.stringify({ ...uploadRequest, intent: "gallery", fileExtension: "mov" }) });
+    expect(mov.status).toBe(400);
+    expect((await mov.json()).message).toContain("MP4");
+    expect(storage.presignPut).not.toHaveBeenCalled();
+  });
+
+  it("signs a gallery video above the image limit and refuses one above the video limit", async () => {
+    const storage = fakeStorage();
+    const video = { ...uploadRequest, intent: "gallery", fileExtension: "mp4", filename: "lobby.mp4" };
+    const accepted = await media({}, storage).request("/media/uploads", { method: "POST", headers, body: JSON.stringify({ ...video, byteSize: 30 * 1024 * 1024 }) });
+    expect(accepted.status).toBe(201);
+    expect(storage.presignPut.mock.calls[0]?.[0]).toMatchObject({ contentType: "video/mp4", contentLength: 30 * 1024 * 1024 });
+    expect(storage.presignPut.mock.calls[0]?.[0].key).toMatch(/^development-files\/gallery\/2026\/10\/[a-z0-9]{16}\.mp4$/);
+
+    const tooLarge = await media({}, storage).request("/media/uploads", { method: "POST", headers, body: JSON.stringify({ ...video, byteSize: 60 * 1024 * 1024 }) });
+    expect(tooLarge.status).toBe(413);
+    expect((await tooLarge.json()).message).toBe("Videos must be 50 MB or smaller.");
   });
 
   it("returns 503 when storage is not configured", async () => {
@@ -229,8 +254,22 @@ describe("media library", () => {
 
 describe("media policy", () => {
   it("derives the content type from the extension and normalises jpeg", () => {
-    expect(resolveImageUpload("blog-cover", ".JPEG")).toEqual({ extension: "jpg", contentType: "image/jpeg" });
-    expect(resolveImageUpload("blog-cover", "svg")).toBeNull();
+    expect(resolveMediaUpload("blog-cover", ".JPEG")).toEqual({ extension: "jpg", contentType: "image/jpeg", kind: "image" });
+    expect(resolveMediaUpload("blog-cover", "svg")).toBeNull();
+  });
+
+  it("allows MP4 and WebM only for the gallery", () => {
+    expect(resolveMediaUpload("gallery", "MP4")).toEqual({ extension: "mp4", contentType: "video/mp4", kind: "video" });
+    expect(resolveMediaUpload("gallery", "webm")).toEqual({ extension: "webm", contentType: "video/webm", kind: "video" });
+    expect(resolveMediaUpload("gallery", "png")).toMatchObject({ kind: "image" });
+    expect(resolveMediaUpload("gallery", "mov")).toBeNull();
+    expect(resolveMediaUpload("blog-cover", "mp4")).toBeNull();
+  });
+
+  it("applies the video limit to videos and the image limit to images", () => {
+    const limits = { imageBytes: 5, videoBytes: 50 };
+    expect(maxBytesFor("video/webm", limits)).toBe(50);
+    expect(maxBytesFor("image/png", limits)).toBe(5);
   });
 
   it("builds date-partitioned keys under the environment prefix", () => {
@@ -240,11 +279,19 @@ describe("media policy", () => {
   });
 
   it("matches image signatures to the declared type", () => {
-    expect(matchesImageSignature("image/png", PNG_BYTES)).toBe(true);
-    expect(matchesImageSignature("image/webp", WEBP_BYTES)).toBe(true);
-    expect(matchesImageSignature("image/jpeg", new Uint8Array([0xff, 0xd8, 0xff, 0xe0]))).toBe(true);
-    expect(matchesImageSignature("image/jpeg", PNG_BYTES)).toBe(false);
-    expect(matchesImageSignature("image/png", new TextEncoder().encode("<html><script>"))).toBe(false);
+    expect(matchesMediaSignature("image/png", PNG_BYTES)).toBe(true);
+    expect(matchesMediaSignature("image/webp", WEBP_BYTES)).toBe(true);
+    expect(matchesMediaSignature("image/jpeg", new Uint8Array([0xff, 0xd8, 0xff, 0xe0]))).toBe(true);
+    expect(matchesMediaSignature("image/jpeg", PNG_BYTES)).toBe(false);
+    expect(matchesMediaSignature("image/png", new TextEncoder().encode("<html><script>"))).toBe(false);
+  });
+
+  it("matches video signatures to the declared type", () => {
+    expect(matchesMediaSignature("video/mp4", MP4_BYTES)).toBe(true);
+    expect(matchesMediaSignature("video/webm", WEBM_BYTES)).toBe(true);
+    expect(matchesMediaSignature("video/webm", MP4_BYTES)).toBe(false);
+    expect(matchesMediaSignature("video/mp4", PNG_BYTES)).toBe(false);
+    expect(matchesMediaSignature("video/mp4", new TextEncoder().encode("<html><script>"))).toBe(false);
   });
 
   it("keeps only a display-safe base filename", () => {

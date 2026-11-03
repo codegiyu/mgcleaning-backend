@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { matchesImageSignature } from "../media/policy.js";
+import { matchesMediaSignature } from "../media/policy.js";
 import { createAdminRouter, type AdminRouterDependencies } from "../routes/v1/admin.js";
 import {
   assertSafeTarget,
@@ -52,7 +52,7 @@ describe("session cookie checks", () => {
 
 describe("smoke helpers", () => {
   it("uploads a real PNG so verification checks image bytes", () => {
-    expect(matchesImageSignature("image/png", TINY_PNG)).toBe(true);
+    expect(matchesMediaSignature("image/png", TINY_PNG)).toBe(true);
   });
 
   it("treats dead-lettered email as failure and waits for every email", () => {

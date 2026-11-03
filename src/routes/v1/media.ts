@@ -7,13 +7,15 @@ import { blogPosts } from "../../db/schema/blogPosts.js";
 import { mediaAssets, type MediaAsset } from "../../db/schema/mediaAssets.js";
 import { env } from "../../env.js";
 import {
-  IMAGE_SIGNATURE_BYTES,
   IMMUTABLE_CACHE_CONTROL,
+  MEDIA_SIGNATURE_BYTES,
   buildMediaKey,
-  matchesImageSignature,
+  matchesMediaSignature,
+  maxBytesFor,
   mediaIntents,
-  resolveImageUpload,
+  resolveMediaUpload,
   type MediaIntent,
+  type UploadLimits,
 } from "../../media/policy.js";
 import { getRequestLogger } from "../../request-context.js";
 import { getMediaStorage, MediaStorageUnavailableError, type MediaStorage } from "../../storage/r2.js";
@@ -107,9 +109,10 @@ export async function inspectUploadedObject(storage: MediaStorage, asset: MediaA
   if (stored.contentType !== asset.contentType) {
     return { kind: "failed", reason: "type_mismatch", message: "The uploaded file type did not match. Upload it again.", removeObject: true };
   }
-  const leadingBytes = await storage.readPrefix(asset.key, IMAGE_SIGNATURE_BYTES);
-  if (!matchesImageSignature(asset.contentType, leadingBytes)) {
-    return { kind: "failed", reason: "not_an_image", message: "That file is not a valid image.", removeObject: true };
+  const leadingBytes = await storage.readPrefix(asset.key, MEDIA_SIGNATURE_BYTES);
+  if (!matchesMediaSignature(asset.contentType, leadingBytes)) {
+    const message = asset.contentType.startsWith("video/") ? "That file is not a valid MP4 or WebM video." : "That file is not a valid image.";
+    return { kind: "failed", reason: "not_an_image", message, removeObject: true };
   }
   return { kind: "verified", byteSize: stored.size };
 }
@@ -216,6 +219,10 @@ function buildProductionDependencies(): MediaRouterDependencies {
   };
 }
 
+function uploadLimits(): UploadLimits {
+  return { imageBytes: env.MEDIA_MAX_UPLOAD_BYTES, videoBytes: env.MEDIA_MAX_VIDEO_UPLOAD_BYTES };
+}
+
 function storageUnavailable(context: Context) {
   return context.json(
     { success: false as const, message: "Image uploads are not configured on this server.", responseCode: 503 },
@@ -236,13 +243,18 @@ export function createMediaRouter(dependencies: MediaRouterDependencies = buildP
     if (!parsed.success) {
       return context.json({ success: false as const, message: "Please check the image details and try again.", responseCode: 400 }, 400);
     }
-    const upload = resolveImageUpload(parsed.data.intent, parsed.data.fileExtension);
+    const upload = resolveMediaUpload(parsed.data.intent, parsed.data.fileExtension);
     if (!upload) {
-      return context.json({ success: false as const, message: "Use a JPG, PNG, or WebP image.", responseCode: 400 }, 400);
+      const message = parsed.data.intent === "gallery"
+        ? "Use a JPG, PNG, or WebP image, or an MP4 or WebM video. iPhone .mov clips need exporting as MP4 first."
+        : "Use a JPG, PNG, or WebP image.";
+      return context.json({ success: false as const, message, responseCode: 400 }, 400);
     }
-    if (parsed.data.byteSize > env.MEDIA_MAX_UPLOAD_BYTES) {
-      const limitMb = Math.floor(env.MEDIA_MAX_UPLOAD_BYTES / (1024 * 1024));
-      return context.json({ success: false as const, message: `Images must be ${limitMb} MB or smaller.`, responseCode: 413 }, 413);
+    const maxBytes = maxBytesFor(upload.contentType, uploadLimits());
+    if (parsed.data.byteSize > maxBytes) {
+      const limitMb = Math.floor(maxBytes / (1024 * 1024));
+      const noun = upload.kind === "video" ? "Videos" : "Images";
+      return context.json({ success: false as const, message: `${noun} must be ${limitMb} MB or smaller.`, responseCode: 413 }, 413);
     }
 
     let storage: MediaStorage;
@@ -320,7 +332,7 @@ export function createMediaRouter(dependencies: MediaRouterDependencies = buildP
       throw error;
     }
 
-    const outcome = await inspectUploadedObject(storage, asset, env.MEDIA_MAX_UPLOAD_BYTES);
+    const outcome = await inspectUploadedObject(storage, asset, maxBytesFor(asset.contentType, uploadLimits()));
     if (outcome.kind === "failed") {
       await dependencies.markFailed(id, outcome.reason);
       if (outcome.removeObject) {
