@@ -10,3 +10,4 @@ export * from "./cacheRevalidations.js";
 export * from "./siteSettings.js";
 export * from "./reviews.js";
 export * from "./channelClicks.js";
+export * from "./galleryItems.js";
