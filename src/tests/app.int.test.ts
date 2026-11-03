@@ -5,7 +5,7 @@ import { app } from "../app.js";
 import { bootstrapAdmins } from "../auth/bootstrap-admins.js";
 import { hashPassword, verifyPassword } from "../auth/password.js";
 import { closeDb, getDb } from "../db/client.js";
-import { adminAuditEvents, adminPasswordResets, adminUsers, cacheRevalidations, contactInquiries, emailOutbox, reviews, siteSettings } from "../db/schema/index.js";
+import { adminAuditEvents, adminPasswordResets, adminUsers, cacheRevalidations, contactInquiries, emailOutbox, galleryItems, mediaAssets, reviews, siteSettings } from "../db/schema/index.js";
 import { runRetention } from "../maintenance/retention.js";
 import { sampleReviews, seedSampleReviews } from "../reviews/sample-reviews.js";
 
@@ -200,6 +200,56 @@ describe("reviews", () => {
 
     const publicList = await (await api("/reviews")).json();
     expect(publicList.data.items).toHaveLength(sampleReviews.filter((sample) => sample.status === "published").length);
+  });
+});
+
+async function verifiedMedia(contentType: string) {
+  const extension = contentType.split("/")[1];
+  const key = `integration/gallery/${randomUUID()}.${extension}`;
+  const [asset] = await getDb()
+    .insert(mediaAssets)
+    .values({ key, publicUrl: `https://media.integration.test/${key}`, intent: "gallery", contentType, declaredBytes: 2048, byteSize: 2048, status: "verified", verifiedAt: new Date(), expiresAt: new Date(Date.now() + 60_000) })
+    .returning();
+  return asset!;
+}
+
+describe("gallery", () => {
+  it("refuses to delete a photo, video, or poster that a gallery item uses", async () => {
+    const owner = await ownerSession();
+    const video = await verifiedMedia("video/mp4");
+    const poster = await verifiedMedia("image/webp");
+    await getDb().insert(galleryItems).values({ type: "video", mediaId: video.id, posterMediaId: poster.id, altText: "A team member polishing a tiled lobby floor", position: 1 });
+
+    for (const id of [video.id, poster.id]) {
+      const response = await api(`/admin/media/${id}`, { method: "DELETE", cookie: owner });
+      expect(response.status).toBe(409);
+    }
+    const [stillThere] = await getDb().select().from(mediaAssets).where(eq(mediaAssets.id, video.id));
+    expect(stillThere?.status).toBe("verified");
+    await expect(getDb().delete(mediaAssets).where(eq(mediaAssets.id, poster.id))).rejects.toThrow();
+  });
+
+  it("refuses unconfirmed rights, a posterless published video, and a second item on one upload at the database", async () => {
+    const photo = await verifiedMedia("image/jpeg");
+    const video = await verifiedMedia("video/webm");
+    const rightsConfirmedAt = new Date();
+    await expect(getDb().insert(galleryItems).values({ type: "image", mediaId: photo.id, altText: "A clean office", position: 1, status: "published" })).rejects.toThrow();
+    await expect(getDb().insert(galleryItems).values({ type: "video", mediaId: video.id, altText: "A clean office", position: 2, status: "published", rightsConfirmedAt })).rejects.toThrow();
+    await expect(getDb().insert(galleryItems).values({ type: "image", mediaId: photo.id, altText: "A clean office", position: 3, layout: "huge" })).rejects.toThrow();
+
+    await getDb().insert(galleryItems).values({ type: "image", mediaId: photo.id, altText: "A clean office", position: 4, status: "published", rightsConfirmedAt });
+    await expect(getDb().insert(galleryItems).values({ type: "image", mediaId: photo.id, altText: "The same office again", position: 5 })).rejects.toThrow();
+  });
+
+  it("refuses a gallery video as an article cover", async () => {
+    const owner = await ownerSession();
+    const video = await verifiedMedia("video/mp4");
+    const response = await api("/admin/blog/posts", {
+      method: "POST",
+      cookie: owner,
+      body: JSON.stringify({ title: "Video cover attempt", slug: `video-cover-${randomUUID().slice(0, 8)}`, excerpt: "An article that should not take a video cover.", body: "This body is long enough to pass validation for a draft.", category: "Home care", serviceSlug: "home-cleaning", coverMediaId: video.id }),
+    });
+    expect(response.status).toBe(400);
   });
 });
 

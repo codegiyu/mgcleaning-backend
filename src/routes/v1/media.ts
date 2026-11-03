@@ -1,9 +1,10 @@
-import { and, count, desc, eq, sql } from "drizzle-orm";
+import { and, count, desc, eq, or, sql } from "drizzle-orm";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { auditContextFrom, recordAudit, type AuditContext } from "../../audit/audit.js";
 import { getDb } from "../../db/client.js";
 import { blogPosts } from "../../db/schema/blogPosts.js";
+import { galleryItems } from "../../db/schema/galleryItems.js";
 import { mediaAssets, type MediaAsset } from "../../db/schema/mediaAssets.js";
 import { env } from "../../env.js";
 import {
@@ -202,6 +203,12 @@ function buildProductionDependencies(): MediaRouterDependencies {
           .where(eq(blogPosts.coverMediaId, id))
           .limit(1);
         if (reference) return { kind: "in-use" };
+        const [galleryReference] = await tx
+          .select({ id: galleryItems.id })
+          .from(galleryItems)
+          .where(or(eq(galleryItems.mediaId, id), eq(galleryItems.posterMediaId, id)))
+          .limit(1);
+        if (galleryReference) return { kind: "in-use" };
         const now = new Date();
         const [deleted] = await tx
           .update(mediaAssets)
@@ -390,7 +397,7 @@ export function createMediaRouter(dependencies: MediaRouterDependencies = buildP
     const result = await dependencies.softDelete(id, auditContextFrom(context, context.get("admin").id));
     if (result.kind === "not-found") return notFound(context);
     if (result.kind === "in-use") {
-      return context.json({ success: false as const, message: "This image is used as an article cover. Replace it there first.", responseCode: 409 }, 409);
+      return context.json({ success: false as const, message: "This file is used as an article cover or in the gallery. Replace or remove it there first.", responseCode: 409 }, 409);
     }
     try {
       await dependencies.storage().delete(result.asset.key);

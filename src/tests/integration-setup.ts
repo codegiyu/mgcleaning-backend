@@ -24,7 +24,7 @@ export default async function setup() {
   try {
     await migrate(drizzle({ client }), { migrationsFolder: "./drizzle" });
     await client.unsafe(
-      "TRUNCATE contact_inquiries, email_outbox, admin_users, admin_sessions, admin_audit_events, blog_posts, media_assets, reviews, cache_revalidations, channel_clicks, site_settings RESTART IDENTITY CASCADE",
+      "TRUNCATE contact_inquiries, email_outbox, admin_users, admin_sessions, admin_audit_events, blog_posts, gallery_items, media_assets, reviews, cache_revalidations, channel_clicks, site_settings RESTART IDENTITY CASCADE",
     );
   } finally {
     await client.end();
