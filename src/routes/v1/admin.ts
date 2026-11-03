@@ -10,6 +10,7 @@ import { BLOG_POST_SLUG_CONSTRAINT, isUniqueViolation } from "../../db/errors.js
 import { getRequestLogger } from "../../request-context.js";
 import { createPasswordResetRouter } from "./password-reset.js";
 import { escapeLike, forbiddenOrigin, pageResult, parsePageQuery, requireOwner, trustedOrigin, uuidSchema, type PageQuery } from "./admin-shared.js";
+import { createGalleryAdminRouter } from "./gallery.js";
 import { createMediaRouter } from "./media.js";
 import { createAccountRouter, type SessionActor } from "./account.js";
 import { createOperationsRouter } from "./operations.js";
@@ -544,6 +545,7 @@ export function createAdminRouter(
   reviewsRouter = createReviewsAdminRouter(),
   usersRouter = createUsersRouter(),
   passwordResetRouter = createPasswordResetRouter(),
+  galleryRouter = createGalleryAdminRouter(),
 ) {
   const router = new Hono<{ Variables: { admin: SessionActor } }>();
 
@@ -751,6 +753,7 @@ export function createAdminRouter(
   router.route("/media", mediaRouter);
   router.route("/account", accountRouter);
   router.route("/reviews", reviewsRouter);
+  router.route("/gallery", galleryRouter);
   router.route("/users", usersRouter);
   router.route("/", operationsRouter);
 
