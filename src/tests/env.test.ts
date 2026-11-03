@@ -38,6 +38,12 @@ describe("parseEnv", () => {
     expect(parseEnv({}).INQUIRY_NOTIFICATION_TO).toBe("inquiries@example.com");
   });
 
+  it("caps gallery videos at 50 MB by default and refuses a limit above 200 MB", () => {
+    expect(parseEnv({}).MEDIA_MAX_VIDEO_UPLOAD_BYTES).toBe(50 * 1024 * 1024);
+    expect(parseEnv({ MEDIA_MAX_VIDEO_UPLOAD_BYTES: String(10 * 1024 * 1024) }).MEDIA_MAX_VIDEO_UPLOAD_BYTES).toBe(10 * 1024 * 1024);
+    expect(() => parseEnv({ MEDIA_MAX_VIDEO_UPLOAD_BYTES: String(201 * 1024 * 1024) })).toThrow();
+  });
+
   it.each([
     ["DATABASE_URL", { DATABASE_URL: undefined }],
     ["REDIS_URL", { REDIS_URL: "" }],

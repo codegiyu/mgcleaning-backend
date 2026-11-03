@@ -24,6 +24,7 @@ import { scoreInquiry } from "../../security/spam-score.js";
 import { verifyTurnstile } from "../../security/turnstile.js";
 import { adminRouter, publicBlogRouter } from "./admin.js";
 import { createPublicReviewsRouter } from "./reviews.js";
+import { createPublicGalleryRouter } from "./gallery.js";
 import { createEventsRouter } from "./events.js";
 import { createReadinessRouter } from "./readiness.js";
 import { describeAttribution, normalizeAttributionValue, normalizeLandingPath } from "../../attribution.js";
@@ -340,6 +341,7 @@ export function createV1Router(
   router.route("/admin", adminRouter);
   router.route("/blog", publicBlogRouter);
   router.route("/reviews", createPublicReviewsRouter());
+  router.route("/gallery", createPublicGalleryRouter());
   router.route("/events", createEventsRouter());
 
   router.post(

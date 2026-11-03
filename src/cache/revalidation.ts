@@ -47,6 +47,21 @@ export function revalidationForReviewChange(before: { status: string } | null, a
   return { tags: [REVIEWS_TAG], mode: wasPublic && !isPublic ? "remove" : "refresh" };
 }
 
+/** Website cache tag for the public gallery. Keep in sync with the web app's gallery fetcher. */
+export const GALLERY_TAG = "gallery";
+
+/**
+ * Which public cache entries a gallery item change touches. An item leaving the site
+ * (unpublished or deleted, `after` null) must disappear at once; other changes to a
+ * published item can be served stale while they refresh.
+ */
+export function revalidationForGalleryChange(before: { status: string } | null, after: { status: string } | null): RevalidationChange | null {
+  const wasPublic = before?.status === "published";
+  const isPublic = after?.status === "published";
+  if (!wasPublic && !isPublic) return null;
+  return { tags: [GALLERY_TAG], mode: wasPublic && !isPublic ? "remove" : "refresh" };
+}
+
 type Insertable = Pick<ReturnType<typeof getDb>, "insert">;
 
 export async function queueRevalidation(executor: Insertable, change: RevalidationChange) {

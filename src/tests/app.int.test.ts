@@ -5,7 +5,7 @@ import { app } from "../app.js";
 import { bootstrapAdmins } from "../auth/bootstrap-admins.js";
 import { hashPassword, verifyPassword } from "../auth/password.js";
 import { closeDb, getDb } from "../db/client.js";
-import { adminAuditEvents, adminPasswordResets, adminUsers, cacheRevalidations, contactInquiries, emailOutbox, reviews, siteSettings } from "../db/schema/index.js";
+import { adminAuditEvents, adminPasswordResets, adminUsers, cacheRevalidations, contactInquiries, emailOutbox, galleryItems, mediaAssets, reviews, siteSettings } from "../db/schema/index.js";
 import { runRetention } from "../maintenance/retention.js";
 import { sampleReviews, seedSampleReviews } from "../reviews/sample-reviews.js";
 
@@ -200,6 +200,100 @@ describe("reviews", () => {
 
     const publicList = await (await api("/reviews")).json();
     expect(publicList.data.items).toHaveLength(sampleReviews.filter((sample) => sample.status === "published").length);
+  });
+});
+
+async function verifiedMedia(contentType: string) {
+  const extension = contentType.split("/")[1];
+  const key = `integration/gallery/${randomUUID()}.${extension}`;
+  const [asset] = await getDb()
+    .insert(mediaAssets)
+    .values({ key, publicUrl: `https://media.integration.test/${key}`, intent: "gallery", contentType, declaredBytes: 2048, byteSize: 2048, status: "verified", verifiedAt: new Date(), expiresAt: new Date(Date.now() + 60_000) })
+    .returning();
+  return asset!;
+}
+
+describe("gallery", () => {
+  it("refuses to delete a photo, video, or poster that a gallery item uses", async () => {
+    const owner = await ownerSession();
+    const video = await verifiedMedia("video/mp4");
+    const poster = await verifiedMedia("image/webp");
+    await getDb().insert(galleryItems).values({ type: "video", mediaId: video.id, posterMediaId: poster.id, altText: "A team member polishing a tiled lobby floor", position: 1 });
+
+    for (const id of [video.id, poster.id]) {
+      const response = await api(`/admin/media/${id}`, { method: "DELETE", cookie: owner });
+      expect(response.status).toBe(409);
+    }
+    const [stillThere] = await getDb().select().from(mediaAssets).where(eq(mediaAssets.id, video.id));
+    expect(stillThere?.status).toBe("verified");
+    await expect(getDb().delete(mediaAssets).where(eq(mediaAssets.id, poster.id))).rejects.toThrow();
+  });
+
+  it("refuses unconfirmed rights, a posterless published video, and a second item on one upload at the database", async () => {
+    const photo = await verifiedMedia("image/jpeg");
+    const video = await verifiedMedia("video/webm");
+    const rightsConfirmedAt = new Date();
+    await expect(getDb().insert(galleryItems).values({ type: "image", mediaId: photo.id, altText: "A clean office", position: 1, status: "published" })).rejects.toThrow();
+    await expect(getDb().insert(galleryItems).values({ type: "video", mediaId: video.id, altText: "A clean office", position: 2, status: "published", rightsConfirmedAt })).rejects.toThrow();
+    await expect(getDb().insert(galleryItems).values({ type: "image", mediaId: photo.id, altText: "A clean office", position: 3, layout: "huge" })).rejects.toThrow();
+
+    await getDb().insert(galleryItems).values({ type: "image", mediaId: photo.id, altText: "A clean office", position: 4, status: "published", rightsConfirmedAt });
+    await expect(getDb().insert(galleryItems).values({ type: "image", mediaId: photo.id, altText: "The same office again", position: 5 })).rejects.toThrow();
+  });
+
+  it("takes a video from draft to the public gallery, reorders it, and removes it with its files", async () => {
+    const owner = await ownerSession();
+    const video = await verifiedMedia("video/mp4");
+    const poster = await verifiedMedia("image/webp");
+
+    const created = await api("/admin/gallery", { method: "POST", cookie: owner, body: JSON.stringify({ mediaId: video.id, altText: "A team member polishing a tiled lobby floor", tags: ["Office"] }) });
+    expect(created.status).toBe(201);
+    const draft = (await created.json()).data;
+    expect(draft).toMatchObject({ type: "video", status: "draft", mediaUrl: video.publicUrl, posterUrl: null });
+
+    const duplicate = await api("/admin/gallery", { method: "POST", cookie: owner, body: JSON.stringify({ mediaId: video.id, altText: "The same clip again" }) });
+    expect(duplicate.status).toBe(409);
+
+    const noRights = await api(`/admin/gallery/${draft.id}`, { method: "PATCH", cookie: owner, body: JSON.stringify({ status: "published", posterMediaId: poster.id, expectedUpdatedAt: draft.updatedAt }) });
+    expect(noRights.status).toBe(422);
+
+    const published = await api(`/admin/gallery/${draft.id}`, { method: "PATCH", cookie: owner, body: JSON.stringify({ status: "published", posterMediaId: poster.id, rightsConfirmed: true, expectedUpdatedAt: draft.updatedAt }) });
+    expect(published.status).toBe(200);
+    const live = (await published.json()).data;
+    expect(live).toMatchObject({ status: "published", posterUrl: poster.publicUrl });
+
+    const stale = await api(`/admin/gallery/${draft.id}`, { method: "PATCH", cookie: owner, body: JSON.stringify({ caption: "Too late", expectedUpdatedAt: draft.updatedAt }) });
+    expect(stale.status).toBe(409);
+
+    const publicItems = (await (await api("/gallery")).json()).data.items;
+    expect(publicItems.find((item: { id: string }) => item.id === draft.id)).toEqual({
+      id: draft.id, type: "video", src: video.publicUrl, poster: poster.publicUrl, alt: "A team member polishing a tiled lobby floor", caption: null, serviceSlug: null, tags: ["Office"], layout: "standard",
+    });
+    expect((await getDb().select().from(cacheRevalidations)).some((row) => row.tags.includes("gallery"))).toBe(true);
+
+    const listed = (await (await api("/admin/gallery", { cookie: owner })).json()).data.items as Array<{ id: string }>;
+    const reversed = listed.map((item) => item.id).reverse();
+    expect((await api("/admin/gallery/order", { method: "PUT", cookie: owner, body: JSON.stringify({ ids: reversed.slice(1) }) })).status).toBe(409);
+    const reordered = await api("/admin/gallery/order", { method: "PUT", cookie: owner, body: JSON.stringify({ ids: reversed }) });
+    expect(reordered.status).toBe(200);
+    expect((await reordered.json()).data.items.map((item: { id: string }) => item.id)).toEqual(reversed);
+
+    const deleted = await api(`/admin/gallery/${draft.id}?expectedUpdatedAt=${encodeURIComponent(live.updatedAt)}`, { method: "DELETE", cookie: owner });
+    expect(deleted.status).toBe(200);
+    const files = await getDb().select({ id: mediaAssets.id, status: mediaAssets.status }).from(mediaAssets).where(sql`${mediaAssets.id} IN (${video.id}, ${poster.id})`);
+    expect(files.map((file) => file.status)).toEqual(["deleted", "deleted"]);
+    expect((await (await api("/gallery")).json()).data.items.some((item: { id: string }) => item.id === draft.id)).toBe(false);
+  });
+
+  it("refuses a gallery video as an article cover", async () => {
+    const owner = await ownerSession();
+    const video = await verifiedMedia("video/mp4");
+    const response = await api("/admin/blog/posts", {
+      method: "POST",
+      cookie: owner,
+      body: JSON.stringify({ title: "Video cover attempt", slug: `video-cover-${randomUUID().slice(0, 8)}`, excerpt: "An article that should not take a video cover.", body: "This body is long enough to pass validation for a draft.", category: "Home care", serviceSlug: "home-cleaning", coverMediaId: video.id }),
+    });
+    expect(response.status).toBe(400);
   });
 });
 

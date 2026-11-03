@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, count, desc, eq, gt, ilike, isNull, lt, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, ilike, isNull, like, lt, or, sql } from "drizzle-orm";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
@@ -10,6 +10,7 @@ import { BLOG_POST_SLUG_CONSTRAINT, isUniqueViolation } from "../../db/errors.js
 import { getRequestLogger } from "../../request-context.js";
 import { createPasswordResetRouter } from "./password-reset.js";
 import { escapeLike, forbiddenOrigin, pageResult, parsePageQuery, requireOwner, trustedOrigin, uuidSchema, type PageQuery } from "./admin-shared.js";
+import { createGalleryAdminRouter } from "./gallery.js";
 import { createMediaRouter } from "./media.js";
 import { createAccountRouter, type SessionActor } from "./account.js";
 import { createOperationsRouter } from "./operations.js";
@@ -303,12 +304,15 @@ async function revokeDatabaseSession(token: string, audit: AuditContext) {
 
 type Transaction = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
 
-/** FOR SHARE blocks a concurrent media delete until this post's transaction commits. */
+/**
+ * FOR SHARE blocks a concurrent media delete until this post's transaction commits.
+ * Only images qualify, so a gallery video is refused as an invalid cover.
+ */
 async function lockCoverAsset(tx: Transaction, id: string): Promise<CoverAsset | null> {
   const [asset] = await tx
     .select({ id: mediaAssets.id, publicUrl: mediaAssets.publicUrl, status: mediaAssets.status })
     .from(mediaAssets)
-    .where(eq(mediaAssets.id, id))
+    .where(and(eq(mediaAssets.id, id), like(mediaAssets.contentType, "image/%")))
     .for("share");
   return asset ?? null;
 }
@@ -541,6 +545,7 @@ export function createAdminRouter(
   reviewsRouter = createReviewsAdminRouter(),
   usersRouter = createUsersRouter(),
   passwordResetRouter = createPasswordResetRouter(),
+  galleryRouter = createGalleryAdminRouter(),
 ) {
   const router = new Hono<{ Variables: { admin: SessionActor } }>();
 
@@ -748,6 +753,7 @@ export function createAdminRouter(
   router.route("/media", mediaRouter);
   router.route("/account", accountRouter);
   router.route("/reviews", reviewsRouter);
+  router.route("/gallery", galleryRouter);
   router.route("/users", usersRouter);
   router.route("/", operationsRouter);
 

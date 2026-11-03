@@ -100,6 +100,8 @@ const envSchema = z
       .default("codegiyu@gmail.com")
       .transform((value) => value.split(",").map((entry) => entry.trim().toLowerCase()).filter(Boolean)),
     MEDIA_MAX_UPLOAD_BYTES: z.coerce.number().int().positive().max(20 * 1024 * 1024).default(5 * 1024 * 1024),
+    /** Gallery videos (MP4 or WebM); about 30–60 seconds of 1080p at the 50 MB default. */
+    MEDIA_MAX_VIDEO_UPLOAD_BYTES: z.coerce.number().int().positive().max(200 * 1024 * 1024).default(50 * 1024 * 1024),
     /**
      * First owner accounts, created at startup when missing (existing accounts are never
      * changed). Remove the password once the owners have signed in.

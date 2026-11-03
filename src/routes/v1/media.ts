@@ -1,19 +1,22 @@
-import { and, count, desc, eq, sql } from "drizzle-orm";
+import { and, count, desc, eq, or, sql } from "drizzle-orm";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { auditContextFrom, recordAudit, type AuditContext } from "../../audit/audit.js";
 import { getDb } from "../../db/client.js";
 import { blogPosts } from "../../db/schema/blogPosts.js";
+import { galleryItems } from "../../db/schema/galleryItems.js";
 import { mediaAssets, type MediaAsset } from "../../db/schema/mediaAssets.js";
 import { env } from "../../env.js";
 import {
-  IMAGE_SIGNATURE_BYTES,
   IMMUTABLE_CACHE_CONTROL,
+  MEDIA_SIGNATURE_BYTES,
   buildMediaKey,
-  matchesImageSignature,
+  matchesMediaSignature,
+  maxBytesFor,
   mediaIntents,
-  resolveImageUpload,
+  resolveMediaUpload,
   type MediaIntent,
+  type UploadLimits,
 } from "../../media/policy.js";
 import { getRequestLogger } from "../../request-context.js";
 import { getMediaStorage, MediaStorageUnavailableError, type MediaStorage } from "../../storage/r2.js";
@@ -50,7 +53,8 @@ export type MediaRouterDependencies = {
   markVerified: (id: string, byteSize: number, audit: AuditContext) => Promise<MediaAsset | null>;
   markFailed: (id: string, reason: string) => Promise<void>;
   markExpired: (id: string) => Promise<void>;
-  listVerified: (query: PageQuery) => Promise<{ items: MediaAsset[]; total: number }>;
+  /** Newest first; `intent` narrows it, e.g. so the article cover library never offers gallery videos. */
+  listVerified: (query: PageQuery & { intent?: MediaIntent }) => Promise<{ items: MediaAsset[]; total: number }>;
   updateAltText: (id: string, altText: string | null, audit: AuditContext) => Promise<MediaAsset | null>;
   softDelete: (id: string, audit: AuditContext) => Promise<DeleteAssetResult>;
   markObjectRemoved: (id: string) => Promise<void>;
@@ -107,9 +111,10 @@ export async function inspectUploadedObject(storage: MediaStorage, asset: MediaA
   if (stored.contentType !== asset.contentType) {
     return { kind: "failed", reason: "type_mismatch", message: "The uploaded file type did not match. Upload it again.", removeObject: true };
   }
-  const leadingBytes = await storage.readPrefix(asset.key, IMAGE_SIGNATURE_BYTES);
-  if (!matchesImageSignature(asset.contentType, leadingBytes)) {
-    return { kind: "failed", reason: "not_an_image", message: "That file is not a valid image.", removeObject: true };
+  const leadingBytes = await storage.readPrefix(asset.key, MEDIA_SIGNATURE_BYTES);
+  if (!matchesMediaSignature(asset.contentType, leadingBytes)) {
+    const message = asset.contentType.startsWith("video/") ? "That file is not a valid MP4 or WebM video." : "That file is not a valid image.";
+    return { kind: "failed", reason: "not_an_image", message, removeObject: true };
   }
   return { kind: "verified", byteSize: stored.size };
 }
@@ -161,7 +166,7 @@ function buildProductionDependencies(): MediaRouterDependencies {
         .where(and(eq(mediaAssets.id, id), eq(mediaAssets.status, "pending")));
     },
     async listVerified(query) {
-      const where = and(eq(mediaAssets.status, "verified"));
+      const where = and(eq(mediaAssets.status, "verified"), query.intent ? eq(mediaAssets.intent, query.intent) : undefined);
       const db = getDb();
       const [items, totals] = await Promise.all([
         db
@@ -199,6 +204,12 @@ function buildProductionDependencies(): MediaRouterDependencies {
           .where(eq(blogPosts.coverMediaId, id))
           .limit(1);
         if (reference) return { kind: "in-use" };
+        const [galleryReference] = await tx
+          .select({ id: galleryItems.id })
+          .from(galleryItems)
+          .where(or(eq(galleryItems.mediaId, id), eq(galleryItems.posterMediaId, id)))
+          .limit(1);
+        if (galleryReference) return { kind: "in-use" };
         const now = new Date();
         const [deleted] = await tx
           .update(mediaAssets)
@@ -214,6 +225,10 @@ function buildProductionDependencies(): MediaRouterDependencies {
       await getDb().update(mediaAssets).set({ objectRemovedAt: sql`now()` }).where(eq(mediaAssets.id, id));
     },
   };
+}
+
+function uploadLimits(): UploadLimits {
+  return { imageBytes: env.MEDIA_MAX_UPLOAD_BYTES, videoBytes: env.MEDIA_MAX_VIDEO_UPLOAD_BYTES };
 }
 
 function storageUnavailable(context: Context) {
@@ -236,13 +251,18 @@ export function createMediaRouter(dependencies: MediaRouterDependencies = buildP
     if (!parsed.success) {
       return context.json({ success: false as const, message: "Please check the image details and try again.", responseCode: 400 }, 400);
     }
-    const upload = resolveImageUpload(parsed.data.intent, parsed.data.fileExtension);
+    const upload = resolveMediaUpload(parsed.data.intent, parsed.data.fileExtension);
     if (!upload) {
-      return context.json({ success: false as const, message: "Use a JPG, PNG, or WebP image.", responseCode: 400 }, 400);
+      const message = parsed.data.intent === "gallery"
+        ? "Use a JPG, PNG, or WebP image, or an MP4 or WebM video. iPhone .mov clips need exporting as MP4 first."
+        : "Use a JPG, PNG, or WebP image.";
+      return context.json({ success: false as const, message, responseCode: 400 }, 400);
     }
-    if (parsed.data.byteSize > env.MEDIA_MAX_UPLOAD_BYTES) {
-      const limitMb = Math.floor(env.MEDIA_MAX_UPLOAD_BYTES / (1024 * 1024));
-      return context.json({ success: false as const, message: `Images must be ${limitMb} MB or smaller.`, responseCode: 413 }, 413);
+    const maxBytes = maxBytesFor(upload.contentType, uploadLimits());
+    if (parsed.data.byteSize > maxBytes) {
+      const limitMb = Math.floor(maxBytes / (1024 * 1024));
+      const noun = upload.kind === "video" ? "Videos" : "Images";
+      return context.json({ success: false as const, message: `${noun} must be ${limitMb} MB or smaller.`, responseCode: 413 }, 413);
     }
 
     let storage: MediaStorage;
@@ -320,7 +340,7 @@ export function createMediaRouter(dependencies: MediaRouterDependencies = buildP
       throw error;
     }
 
-    const outcome = await inspectUploadedObject(storage, asset, env.MEDIA_MAX_UPLOAD_BYTES);
+    const outcome = await inspectUploadedObject(storage, asset, maxBytesFor(asset.contentType, uploadLimits()));
     if (outcome.kind === "failed") {
       await dependencies.markFailed(id, outcome.reason);
       if (outcome.removeObject) {
@@ -346,10 +366,11 @@ export function createMediaRouter(dependencies: MediaRouterDependencies = buildP
 
   router.get("/", async (context) => {
     const parsed = parsePageQuery(context);
-    if (!parsed.success) {
+    const intent = z.enum(mediaIntents).optional().safeParse(context.req.query("intent") || undefined);
+    if (!parsed.success || !intent.success) {
       return context.json({ success: false as const, message: "Invalid image filters.", responseCode: 400 }, 400);
     }
-    const result = await dependencies.listVerified(parsed.data);
+    const result = await dependencies.listVerified({ ...parsed.data, ...(intent.data ? { intent: intent.data } : {}) });
     return context.json({
       success: true as const,
       message: "Images loaded.",
@@ -378,7 +399,7 @@ export function createMediaRouter(dependencies: MediaRouterDependencies = buildP
     const result = await dependencies.softDelete(id, auditContextFrom(context, context.get("admin").id));
     if (result.kind === "not-found") return notFound(context);
     if (result.kind === "in-use") {
-      return context.json({ success: false as const, message: "This image is used as an article cover. Replace it there first.", responseCode: 409 }, 409);
+      return context.json({ success: false as const, message: "This file is used as an article cover or in the gallery. Replace or remove it there first.", responseCode: 409 }, 409);
     }
     try {
       await dependencies.storage().delete(result.asset.key);
