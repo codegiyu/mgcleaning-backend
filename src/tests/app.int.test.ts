@@ -241,6 +241,50 @@ describe("gallery", () => {
     await expect(getDb().insert(galleryItems).values({ type: "image", mediaId: photo.id, altText: "The same office again", position: 5 })).rejects.toThrow();
   });
 
+  it("takes a video from draft to the public gallery, reorders it, and removes it with its files", async () => {
+    const owner = await ownerSession();
+    const video = await verifiedMedia("video/mp4");
+    const poster = await verifiedMedia("image/webp");
+
+    const created = await api("/admin/gallery", { method: "POST", cookie: owner, body: JSON.stringify({ mediaId: video.id, altText: "A team member polishing a tiled lobby floor", tags: ["Office"] }) });
+    expect(created.status).toBe(201);
+    const draft = (await created.json()).data;
+    expect(draft).toMatchObject({ type: "video", status: "draft", mediaUrl: video.publicUrl, posterUrl: null });
+
+    const duplicate = await api("/admin/gallery", { method: "POST", cookie: owner, body: JSON.stringify({ mediaId: video.id, altText: "The same clip again" }) });
+    expect(duplicate.status).toBe(409);
+
+    const noRights = await api(`/admin/gallery/${draft.id}`, { method: "PATCH", cookie: owner, body: JSON.stringify({ status: "published", posterMediaId: poster.id, expectedUpdatedAt: draft.updatedAt }) });
+    expect(noRights.status).toBe(422);
+
+    const published = await api(`/admin/gallery/${draft.id}`, { method: "PATCH", cookie: owner, body: JSON.stringify({ status: "published", posterMediaId: poster.id, rightsConfirmed: true, expectedUpdatedAt: draft.updatedAt }) });
+    expect(published.status).toBe(200);
+    const live = (await published.json()).data;
+    expect(live).toMatchObject({ status: "published", posterUrl: poster.publicUrl });
+
+    const stale = await api(`/admin/gallery/${draft.id}`, { method: "PATCH", cookie: owner, body: JSON.stringify({ caption: "Too late", expectedUpdatedAt: draft.updatedAt }) });
+    expect(stale.status).toBe(409);
+
+    const publicItems = (await (await api("/gallery")).json()).data.items;
+    expect(publicItems.find((item: { id: string }) => item.id === draft.id)).toEqual({
+      id: draft.id, type: "video", src: video.publicUrl, poster: poster.publicUrl, alt: "A team member polishing a tiled lobby floor", caption: null, serviceSlug: null, tags: ["Office"], layout: "standard",
+    });
+    expect((await getDb().select().from(cacheRevalidations)).some((row) => row.tags.includes("gallery"))).toBe(true);
+
+    const listed = (await (await api("/admin/gallery", { cookie: owner })).json()).data.items as Array<{ id: string }>;
+    const reversed = listed.map((item) => item.id).reverse();
+    expect((await api("/admin/gallery/order", { method: "PUT", cookie: owner, body: JSON.stringify({ ids: reversed.slice(1) }) })).status).toBe(409);
+    const reordered = await api("/admin/gallery/order", { method: "PUT", cookie: owner, body: JSON.stringify({ ids: reversed }) });
+    expect(reordered.status).toBe(200);
+    expect((await reordered.json()).data.items.map((item: { id: string }) => item.id)).toEqual(reversed);
+
+    const deleted = await api(`/admin/gallery/${draft.id}?expectedUpdatedAt=${encodeURIComponent(live.updatedAt)}`, { method: "DELETE", cookie: owner });
+    expect(deleted.status).toBe(200);
+    const files = await getDb().select({ id: mediaAssets.id, status: mediaAssets.status }).from(mediaAssets).where(sql`${mediaAssets.id} IN (${video.id}, ${poster.id})`);
+    expect(files.map((file) => file.status)).toEqual(["deleted", "deleted"]);
+    expect((await (await api("/gallery")).json()).data.items.some((item: { id: string }) => item.id === draft.id)).toBe(false);
+  });
+
   it("refuses a gallery video as an article cover", async () => {
     const owner = await ownerSession();
     const video = await verifiedMedia("video/mp4");
